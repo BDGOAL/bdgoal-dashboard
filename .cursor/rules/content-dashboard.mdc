@@ -1,0 +1,12 @@
+---
+description: Content dashboard project rules
+globs: ["**/*.{ts,tsx,js,jsx}"]
+alwaysApply: true
+---
+
+Use Next.js App Router, TypeScript, Tailwind, and shadcn/ui.
+Build a dark-theme content dashboard.
+Keep pages thin and extract reusable components.
+Use mock data first.
+Do not rewrite unrelated files.
+Before coding, inspect the codebase and list files to update.
