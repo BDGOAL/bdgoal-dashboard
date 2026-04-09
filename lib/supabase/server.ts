@@ -1,11 +1,23 @@
 import { cookies } from "next/headers"
 import { createServerClient } from "@supabase/ssr"
 
+export function getMissingSupabasePublicEnv(): string[] {
+  const missing: string[] = []
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    missing.push("NEXT_PUBLIC_SUPABASE_URL")
+  }
+  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    missing.push("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+  }
+  return missing
+}
+
 function getEnv() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
   if (!url || !anon) {
-    throw new Error("缺少 NEXT_PUBLIC_SUPABASE_URL 或 NEXT_PUBLIC_SUPABASE_ANON_KEY。")
+    const missing = getMissingSupabasePublicEnv()
+    throw new Error(`缺少 Supabase 環境變數：${missing.join(", ")}`)
   }
   return { url, anon }
 }

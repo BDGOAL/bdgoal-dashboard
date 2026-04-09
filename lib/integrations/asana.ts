@@ -13,7 +13,9 @@ type AsanaApiResponse<T> = {
 }
 
 function getAsanaConfig() {
-  const pat = process.env.ASANA_PAT?.trim()
+  const pat =
+    process.env.ASANA_ACCESS_TOKEN?.trim() ??
+    process.env.ASANA_PAT?.trim()
   const projectGid = process.env.ASANA_PROJECT_GID?.trim()
   return { pat, projectGid }
 }
@@ -21,7 +23,7 @@ function getAsanaConfig() {
 async function asanaFetch<T>(path: string): Promise<T> {
   const { pat } = getAsanaConfig()
   if (!pat) {
-    throw new Error("ASANA_PAT 未設定，無法讀取 Asana Ready Queue。")
+    throw new Error("ASANA_ACCESS_TOKEN/ASANA_PAT 未設定，無法讀取 Asana。")
   }
 
   const res = await fetch(`${ASANA_BASE_URL}${path}`, {
