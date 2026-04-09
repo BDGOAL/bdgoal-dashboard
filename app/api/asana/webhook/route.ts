@@ -1,9 +1,4 @@
-import { NextResponse } from "next/server"
-
-import {
-  handleAsanaWebhookEvents,
-  verifyAsanaWebhookSignature,
-} from "@/lib/integrations/asana-webhook-handler"
+import { NextRequest, NextResponse } from "next/server"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -20,7 +15,7 @@ type AsanaWebhookPayload = {
   }>
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const hookSecret = req.headers.get("x-hook-secret")
   const rawBody = await req.text()
 
@@ -43,49 +38,8 @@ export async function POST(req: Request) {
     }
   }
 
-  const signature = req.headers.get("x-hook-signature")
-  if (!signature) {
-    console.error("[asana/webhook] missing signature")
-    return new NextResponse("missing signature", { status: 400 })
-  }
+  // 暫時唔做 signature 驗證 / 寫入 DB，只係 log 一 log
+  console.log("[asana/webhook] raw body:", rawBody)
 
-  const secret = process.env.ASANA_WEBHOOK_SECRET?.trim()
-  if (!secret) {
-    console.error("[asana/webhook] missing ASANA_WEBHOOK_SECRET")
-    return new NextResponse("webhook not configured", { status: 500 })
-  }
-
-  const isValid = verifyAsanaWebhookSignature({
-    rawBody,
-    signatureHeader: signature,
-    secret,
-  })
-  if (!isValid) {
-    console.error("[asana/webhook] invalid signature")
-    return new NextResponse("invalid signature", { status: 401 })
-  }
-
-  let body: AsanaWebhookPayload
-  try {
-    body = rawBody ? (JSON.parse(rawBody) as AsanaWebhookPayload) : {}
-  } catch {
-    console.error("[asana/webhook] invalid json")
-    return new NextResponse("invalid payload", { status: 400 })
-  }
-
-  const events = body.events ?? []
-  if (events.length === 0) {
-    return new NextResponse("ok", { status: 200 })
-  }
-
-  try {
-    await handleAsanaWebhookEvents(events)
-    return new NextResponse("ok", { status: 200 })
-  } catch (error) {
-    console.error("[asana/webhook] event processing error", {
-      message: error instanceof Error ? error.message : String(error),
-    })
-    return new NextResponse("processing failed", { status: 500 })
-  }
+  return new NextResponse("ok", { status: 200 })
 }
-
