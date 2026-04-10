@@ -46,9 +46,14 @@ type AsanaCustomField = {
 export type AsanaTaskLite = {
   gid: string
   name: string
+  completed?: boolean
+  due_on?: string | null
+  notes?: string | null
   parent?: { gid: string } | null
   tags?: Array<{ name?: string | null }> | null
   custom_fields?: AsanaCustomField[] | null
+  /** Present when tasks are fetched with attachments.* in opt_fields */
+  attachments?: AsanaAttachmentLite[] | null
 }
 
 export type AsanaAttachmentLite = {
