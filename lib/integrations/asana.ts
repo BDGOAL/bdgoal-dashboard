@@ -175,3 +175,14 @@ export async function fetchAsanaReadyItemByTaskId(
   if (!isAsanaReadyToSync(normalized)) return null
   return normalized
 }
+
+
+export async function fetchAllNormalizedTasks(): Promise<import("@/lib/integrations/asana-normalize").AsanaReadyItem[]> {
+  const { projectGid } = getAsanaConfig()
+  if (!projectGid) throw new Error("ASANA_PROJECT_GID not set")
+  const tasks = await fetchAllProjectTasks(projectGid)
+  const mainTasks = tasks.filter((t) => !t.parent?.gid && !t.completed)
+  return mainTasks.map((task) =>
+    normalizeAsanaTaskToReadyItem(task, task.attachments ?? [])
+  )
+}
