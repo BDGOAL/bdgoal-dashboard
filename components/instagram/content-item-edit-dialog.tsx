@@ -15,6 +15,13 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import type { ContentItem } from "@/lib/types/dashboard"
+import {
+  applyScheduledAtChangeRule,
+  applyStatusChangeRule,
+  toPlannedPublishDateIso,
+  validateStatusAndScheduledAt,
+  type ContentWorkflowStatus,
+} from "@/components/instagram/status-schedule-rules"
 
 type Props = {
   item: ContentItem | null
@@ -29,9 +36,7 @@ export function ContentItemEditDialog({
   onOpenChange,
   onSaved,
 }: Props) {
-  const [status, setStatus] = React.useState<"planning" | "scheduled" | "published">(
-    "planning",
-  )
+  const [status, setStatus] = React.useState<ContentWorkflowStatus>("planning")
   const [plannedPublishDate, setPlannedPublishDate] = React.useState("")
   const [localNotes, setLocalNotes] = React.useState("")
   const [saving, setSaving] = React.useState(false)
@@ -39,13 +44,7 @@ export function ContentItemEditDialog({
 
   React.useEffect(() => {
     if (!item) return
-    setStatus(
-      item.status === "published"
-        ? "published"
-        : item.status === "scheduled"
-          ? "scheduled"
-          : "planning",
-    )
+    setStatus(item.status === "published" ? "published" : item.status === "scheduled" ? "scheduled" : "planning")
     setPlannedPublishDate(
       item.plannedPublishDate
         ? new Date(item.plannedPublishDate).toISOString().slice(0, 16)
@@ -63,16 +62,19 @@ export function ContentItemEditDialog({
     setSaving(true)
     setError(null)
     try {
-      const iso = plannedPublishDate
-        ? new Date(plannedPublishDate).toISOString()
-        : null
+      const ruleError = validateStatusAndScheduledAt(status, plannedPublishDate)
+      if (ruleError) {
+        setError(ruleError)
+        return
+      }
+      const iso = toPlannedPublishDateIso(plannedPublishDate)
       const res = await fetch("/api/content/items", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: item.id,
           status,
-          plannedPublishDate: status === "planning" ? null : iso,
+          plannedPublishDate: iso,
           localNotes,
           expectedUpdatedAt: item.updatedAt,
         }),
@@ -116,9 +118,15 @@ export function ContentItemEditDialog({
                 id="edit-status"
                 className="border-input bg-background h-8 rounded-md border px-2 text-xs"
                 value={status}
-                onChange={(e) =>
-                  setStatus(e.target.value as "planning" | "scheduled" | "published")
-                }
+                onChange={(e) => {
+                  const next = applyStatusChangeRule(
+                    e.target.value as ContentWorkflowStatus,
+                    plannedPublishDate,
+                  )
+                  setStatus(next.status)
+                  setPlannedPublishDate(next.scheduledAt)
+                  setError(null)
+                }}
               >
                 <option value="planning">planning</option>
                 <option value="scheduled">scheduled</option>
@@ -133,9 +141,20 @@ export function ContentItemEditDialog({
                 id="edit-planned"
                 type="datetime-local"
                 value={plannedPublishDate}
-                onChange={(e) => setPlannedPublishDate(e.target.value)}
+                onChange={(e) => {
+                  const next = applyScheduledAtChangeRule(e.target.value, status)
+                  setPlannedPublishDate(next.scheduledAt)
+                  setStatus(next.status)
+                  setError(null)
+                }}
+                disabled={status === "published"}
                 className="h-8 text-sm"
               />
+              {status === "published" ? (
+                <p className="text-muted-foreground text-[11px]">
+                  published 狀態不需設定排程時間。
+                </p>
+              ) : null}
             </div>
             <div className="space-y-1">
               <Label htmlFor="edit-notes" className="text-xs">

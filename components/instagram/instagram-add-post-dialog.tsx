@@ -26,6 +26,12 @@ import { mockSocialAccounts } from "@/lib/mock/agency"
 import { pickAccountForNewPost } from "@/lib/scope/pick-account"
 import { useWorkspaceScope } from "@/components/dashboard/workspace-scope-context"
 import { cn } from "@/lib/utils"
+import {
+  applyScheduledAtChangeRule,
+  applyStatusChangeRule,
+  toPlannedPublishDateIso,
+  validateStatusAndScheduledAt,
+} from "@/components/instagram/status-schedule-rules"
 
 const selectClass = cn(
   "border-input bg-background dark:bg-input/30 h-7 w-full rounded-md border px-2 text-xs shadow-none outline-none",
@@ -36,71 +42,175 @@ type InstagramAddPostDialogProps = {
   onAdded: () => void
 }
 
+type ToastState = {
+  type: "success" | "error"
+  message: string
+} | null
+
+function useDebouncedSetter<T>(
+  setter: React.Dispatch<React.SetStateAction<T>>,
+  delayMs = 300,
+) {
+  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  React.useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
+  }, [])
+
+  return React.useCallback(
+    (value: T) => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(() => {
+        setter((prev) => (Object.is(prev, value) ? prev : value))
+      }, delayMs)
+    },
+    [delayMs, setter],
+  )
+}
+
 export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps) {
   const { scope } = useWorkspaceScope()
   const [open, setOpen] = React.useState(false)
-  const [title, setTitle] = React.useState("")
-  const [caption, setCaption] = React.useState("")
+  const [localTitle, setLocalTitle] = React.useState("")
+  const [debouncedTitle, setDebouncedTitle] = React.useState("")
+  const [localCaption, setLocalCaption] = React.useState("")
+  const [debouncedCaption, setDebouncedCaption] = React.useState("")
   const [postType, setPostType] = React.useState<ContentPostType>("feed")
   const [status, setStatus] = React.useState<"planning" | "scheduled" | "published">(
     "planning",
   )
-  const [scheduledAt, setScheduledAt] = React.useState("")
-  const [saving, setSaving] = React.useState(false)
+  const [localScheduledAt, setLocalScheduledAt] = React.useState("")
+  const [isSubmitting, setIsSubmitting] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [toast, setToast] = React.useState<ToastState>(null)
 
-  function reset() {
-    setTitle("")
-    setCaption("")
+  const debouncedSetTitle = useDebouncedSetter(setDebouncedTitle, 300)
+  const debouncedSetCaption = useDebouncedSetter(setDebouncedCaption, 300)
+
+  React.useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 2400)
+    return () => clearTimeout(timer)
+  }, [toast])
+
+  const handleTitleChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value
+      setLocalTitle(value)
+      debouncedSetTitle(value)
+    },
+    [debouncedSetTitle],
+  )
+
+  const handleCaptionChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = e.target.value
+      setLocalCaption(value)
+      debouncedSetCaption(value)
+    },
+    [debouncedSetCaption],
+  )
+
+  const handleScheduledAtChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const next = applyScheduledAtChangeRule(e.target.value, status)
+      setLocalScheduledAt(next.scheduledAt)
+      setStatus(next.status)
+      setError(null)
+    },
+    [status],
+  )
+
+  const handleStatusChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const next = applyStatusChangeRule(e.target.value as typeof status, localScheduledAt)
+      setStatus(next.status)
+      setLocalScheduledAt(next.scheduledAt)
+      setError(null)
+    },
+    [localScheduledAt],
+  )
+
+  const canSubmit = React.useMemo(
+    () => Boolean(localTitle.trim()) && !isSubmitting && !validateStatusAndScheduledAt(status, localScheduledAt),
+    [isSubmitting, localScheduledAt, localTitle, status],
+  )
+
+  const reset = React.useCallback(() => {
+    setLocalTitle("")
+    setDebouncedTitle("")
+    setLocalCaption("")
+    setDebouncedCaption("")
     setPostType("feed")
     setStatus("planning")
-    setScheduledAt("")
+    setLocalScheduledAt("")
     setError(null)
-  }
+  }, [])
 
-  async function handleSubmit(e: React.FormEvent) {
+  const handleSubmit = React.useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
-    const t = title.trim()
-    if (!t) return
-
-    let scheduledIso: string | null = null
-    if (scheduledAt) {
-      const d = new Date(scheduledAt)
-      if (!Number.isNaN(d.getTime())) scheduledIso = d.toISOString()
+    const trimmedTitle = localTitle.trim()
+    const trimmedCaption = localCaption.trim()
+    if (!trimmedTitle) return
+    const ruleError = validateStatusAndScheduledAt(status, localScheduledAt)
+    if (ruleError) {
+      setError(ruleError)
+      return
     }
 
-    const acc = pickAccountForNewPost(scope, "instagram", mockSocialAccounts)
+    const plannedPublishDate = toPlannedPublishDateIso(localScheduledAt)
 
-    setSaving(true)
+    const acc = pickAccountForNewPost(scope, "instagram", mockSocialAccounts)
+    const createPayload = {
+      title: trimmedTitle,
+      caption: trimmedCaption,
+      plannedPublishDate,
+      platform: "instagram" as const,
+      contentType: postType,
+      status,
+      client: acc.clientId,
+    }
+
+    setIsSubmitting(true)
     setError(null)
     try {
       const res = await fetch("/api/content/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: t,
-          client: acc.clientId,
-          platform: "instagram",
-          contentType: postType,
-          caption: caption.trim(),
-          plannedPublishDate: status === "planning" ? null : scheduledIso,
-          status,
-        }),
+        body: JSON.stringify(createPayload),
       })
       const json = (await res.json()) as { error?: string }
       if (!res.ok) {
-        setError(json.error ?? "新增失敗。")
+        const msg = json.error ?? "新增失敗。"
+        setError(msg)
+        setToast({ type: "error", message: msg })
         return
       }
       onAdded()
+      setToast({ type: "success", message: "已成功新增貼文。" })
+      // Keep dialog open briefly so success feedback is visible.
+      await new Promise((resolve) => setTimeout(resolve, 700))
       reset()
       setOpen(false)
     } catch {
-      setError("新增失敗，請稍後再試。")
+      const msg = "新增失敗，請稍後再試。"
+      setError(msg)
+      setToast({ type: "error", message: msg })
     } finally {
-      setSaving(false)
+      setIsSubmitting(false)
     }
-  }
+  }, [
+    localCaption,
+    localScheduledAt,
+    localTitle,
+    onAdded,
+    postType,
+    reset,
+    scope,
+    status,
+  ])
 
   return (
     <>
@@ -115,6 +225,19 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="gap-0 sm:max-w-md">
+          {toast ? (
+            <div
+              role="status"
+              className={cn(
+                "absolute right-4 top-4 z-50 rounded-md px-3 py-2 text-xs shadow-md",
+                toast.type === "success"
+                  ? "bg-emerald-600/95 text-white"
+                  : "bg-red-600/95 text-white",
+              )}
+            >
+              {toast.message}
+            </div>
+          ) : null}
           <form onSubmit={handleSubmit}>
             <DialogHeader className="border-border/50 space-y-1 border-b pb-3 text-left">
               <DialogTitle>新增貼文</DialogTitle>
@@ -129,8 +252,8 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
                 </Label>
                 <Input
                   id="ig-d-title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
+                  value={localTitle}
+                  onChange={handleTitleChange}
                   placeholder="貼文標題"
                   required
                   className="h-8 text-sm"
@@ -142,8 +265,8 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
                 </Label>
                 <Textarea
                   id="ig-d-caption"
-                  value={caption}
-                  onChange={(e) => setCaption(e.target.value)}
+                  value={localCaption}
+                  onChange={handleCaptionChange}
                   placeholder="主要文案（可簡短）"
                   rows={2}
                   className="min-h-[3.25rem] resize-y text-sm"
@@ -177,7 +300,7 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
                     id="ig-d-status"
                     className={selectClass}
                     value={status}
-                    onChange={(e) => setStatus(e.target.value as typeof status)}
+                    onChange={handleStatusChange}
                   >
                     <option value="planning">planning</option>
                     <option value="scheduled">scheduled</option>
@@ -192,10 +315,16 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
                 <Input
                   id="ig-d-scheduled"
                   type="datetime-local"
-                  value={scheduledAt}
-                  onChange={(e) => setScheduledAt(e.target.value)}
+                  value={localScheduledAt}
+                  onChange={handleScheduledAtChange}
+                  disabled={status === "published"}
                   className="h-8 text-sm"
                 />
+                {status === "published" ? (
+                  <p className="text-muted-foreground text-[11px]">
+                    published 狀態不需設定排程時間。
+                  </p>
+                ) : null}
               </div>
               {error ? <p className="text-destructive text-xs">{error}</p> : null}
             </div>
@@ -208,8 +337,8 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
               >
                 取消
               </Button>
-              <Button type="submit" size="sm" disabled={!title.trim() || saving}>
-                {saving ? "儲存中..." : "加入"}
+              <Button type="submit" size="sm" disabled={!canSubmit}>
+                {isSubmitting ? "儲存中..." : "加入"}
               </Button>
             </DialogFooter>
           </form>

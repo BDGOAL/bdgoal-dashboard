@@ -51,6 +51,12 @@ export type UpdateStoredInput = {
   expectedUpdatedAt?: string
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  )
+}
+
 async function deriveClientId(client: string) {
   const supabase = await createSupabaseServerClient()
   const trimmed = client.trim()
@@ -239,7 +245,8 @@ export async function upsertStoredContentItem(
   const supabase = await createSupabaseServerClient()
   const clientId = await deriveClientId(item.client)
   const payload = {
-    id: item.id.startsWith("cnt-") ? undefined : item.id,
+    // content_items.id is uuid in Supabase; only pass through valid uuid.
+    id: isUuid(item.id) ? item.id : undefined,
     client_id: clientId,
     platform: item.platform,
     content_type: item.contentType,
@@ -267,7 +274,7 @@ export async function createManualContentItem(
 ): Promise<DashboardStoredContentItem> {
   const now = new Date().toISOString()
   const item: DashboardStoredContentItem = {
-    id: `manual-${crypto.randomUUID()}`,
+    id: crypto.randomUUID(),
     source: "manual",
     sourceRef: {},
     title: input.title.trim(),
