@@ -171,8 +171,8 @@ export function isAsanaReadyToSync(item: AsanaReadyItem): boolean {
   const hasRequiredBaseFields =
     Boolean(item.client) &&
     Boolean(item.platform) &&
-    Boolean(item.contentType)
-    
+    Boolean(item.contentType) &&
+    Boolean(item.finalCaption)
   const hasMainTaskAttachment = item.attachments.length > 0
 
   return (
