@@ -22,7 +22,7 @@ import {
 import {
   contentPostTypeLabel,
 } from "@/lib/instagram/labels"
-import { mockSocialAccounts } from "@/lib/mock/agency"
+import { mockClients, mockSocialAccounts } from "@/lib/mock/agency"
 import { pickAccountForNewPost } from "@/lib/scope/pick-account"
 import { useWorkspaceScope } from "@/components/dashboard/workspace-scope-context"
 import { cn } from "@/lib/utils"
@@ -163,6 +163,9 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
     const plannedPublishDate = toPlannedPublishDateIso(localScheduledAt)
 
     const acc = pickAccountForNewPost(scope, "instagram", mockSocialAccounts)
+    const mockClientRow = mockClients.find((c) => c.id === acc.clientId)
+    // Prefer display name so deriveClientId() can resolve by clients.name when DB id differs from mock ids.
+    const clientForApi = (mockClientRow?.name ?? acc.clientId).trim()
     const createPayload = {
       title: trimmedTitle,
       caption: trimmedCaption,
@@ -170,7 +173,7 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
       platform: "instagram" as const,
       contentType: postType,
       status,
-      client: acc.clientId,
+      client: clientForApi,
     }
 
     setIsSubmitting(true)

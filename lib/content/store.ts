@@ -81,7 +81,10 @@ async function deriveClientId(client: string) {
     .eq("slug", slug)
     .maybeSingle()
   if (bySlug?.id) return bySlug.id
-  return trimmed
+
+  throw new Error(
+    `找不到對應客戶：「${trimmed}」。請確認 Supabase public.clients 已建立此客戶（id / name / slug 至少一項相符），且目前帳號在 client_memberships 有讀取該客戶；原型環境可參考 supabase/README 的 cl-aurora / cl-pulse 種子說明。`,
+  )
 }
 
 export async function listStoredContentItems(): Promise<DashboardStoredContentItem[]> {
