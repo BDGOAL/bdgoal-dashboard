@@ -106,10 +106,11 @@ export async function listDashboardContentItems(): Promise<ContentItem[]> {
   const clientNameMap = Object.fromEntries((clients ?? []).map((c) => [c.id, c.name]))
 
   const ids = (rows ?? []).map((r) => r.id)
+  if (!ids.length) return []
   const { data: atts, error: attErr } = await supabase
     .from("content_attachments")
     .select("id, content_item_id, url, type, sort_order")
-    .in("content_item_id", ids.length ? ids : ["__none__"])
+          .in("content_item_id", ids)
     .order("sort_order", { ascending: true })
   if (attErr) throw new Error(`讀取 attachments 失敗：${attErr.message}`)
 
