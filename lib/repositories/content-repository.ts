@@ -27,6 +27,27 @@ type DbContentItem = {
   updated_at: string
 }
 
+type DbContentAttachmentRow = {
+  id: string
+  url: string
+  type: string | null
+  sort_order: number
+}
+
+type DbContentItemWithAttachments = DbContentItem & {
+  content_attachments?: DbContentAttachmentRow[] | null
+}
+
+function attachmentsFromNestedRow(
+  row: DbContentItemWithAttachments,
+): Array<{ name: string; url: string }> {
+  const raw = row.content_attachments
+  if (!raw?.length) return []
+  return [...raw]
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((a) => ({ name: a.type ?? "asset", url: a.url }))
+}
+
 function normalizePlatform(input: string): ContentPlatform | null {
   const v = input.toLowerCase()
   if (["instagram", "ig"].includes(v)) return "instagram"
@@ -103,49 +124,44 @@ export async function listDashboardContentItems(): Promise<ContentItem[]> {
   const supabase = await createSupabaseServerClient()
   const { data: rows, error } = await supabase
     .from("content_items")
-    .select("*")
+    .select(
+      `
+      *,
+      content_attachments (
+        id,
+        url,
+        type,
+        sort_order
+      )
+    `,
+    )
     .order("updated_at", { ascending: false })
   if (error) throw new Error(`讀取 content_items 失敗：${error.message}`)
 
-  const rowList = rows ?? []
+  const rowList = (rows ?? []) as DbContentItemWithAttachments[]
   if (!rowList.length) return []
 
   const clientIds = Array.from(new Set(rowList.map((r) => r.client_id)))
-  const ids = rowList.map((r) => r.id)
-
-  const [{ data: clients, error: clientsError }, { data: atts, error: attErr }] =
-    await Promise.all([
-      supabase
-        .from("clients")
-        .select("id,name")
-        .in("id", clientIds.length ? clientIds : ["__none__"]),
-      supabase
-        .from("content_attachments")
-        .select("id, content_item_id, url, type, sort_order")
-        .in("content_item_id", ids)
-        .order("sort_order", { ascending: true }),
-    ])
+  const { data: clients, error: clientsError } = await supabase
+    .from("clients")
+    .select("id,name")
+    .in("id", clientIds.length ? clientIds : ["__none__"])
 
   if (clientsError) {
     throw new Error(`讀取 clients 失敗：${clientsError.message}`)
   }
-  if (attErr) throw new Error(`讀取 attachments 失敗：${attErr.message}`)
 
   const clientNameMap = Object.fromEntries(
     (clients ?? []).map((c) => [c.id, c.name]),
   )
 
-  const byItem = new Map<string, Array<{ name: string; url: string }>>()
-  for (const a of atts ?? []) {
-    const arr = byItem.get(a.content_item_id) ?? []
-    arr.push({ name: a.type ?? "asset", url: a.url })
-    byItem.set(a.content_item_id, arr)
-  }
-
   return rowList
-    .map((r) =>
-      mapDbRowToDashboard(r as DbContentItem, clientNameMap, byItem.get(r.id) ?? []),
-    )
+    .map((r) => {
+      const attachments = attachmentsFromNestedRow(r)
+      const { content_attachments, ...flat } = r
+      void content_attachments
+      return mapDbRowToDashboard(flat as DbContentItem, clientNameMap, attachments)
+    })
     .filter((x): x is ContentItem => Boolean(x))
 }
 

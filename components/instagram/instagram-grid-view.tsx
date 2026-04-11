@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ImageIcon, PencilLine } from "lucide-react"
+import { ImageIcon } from "lucide-react"
 
 import type { WorkspaceScope } from "@/lib/types/agency"
 import type { ContentItem, ContentStatus } from "@/lib/types/dashboard"
@@ -17,35 +17,28 @@ import {
 } from "@/components/ui/dialog"
 import { EmptyState } from "@/components/dashboard/empty-state"
 import { dashboardSelectClassName } from "@/lib/dashboard/form-controls"
-import { contentPlatformLabel } from "@/lib/calendar/labels"
-import { contentPostTypeLabel, contentStatusLabel } from "@/lib/instagram/labels"
+import { contentStatusLabel } from "@/lib/instagram/labels"
 import { cn } from "@/lib/utils"
 
 const t = {
-  gridNeedClientTitle:
-    "\u8acb\u5148\u9078\u64c7\u5ba2\u6236\u4ee5\u6aa2\u8996 Instagram Grid",
+  gridNeedClientTitle: "請先選擇客戶以檢視 Instagram Grid",
   gridNeedClientReason:
-    "Grid \u50c5\u652f\u63f4\u55ae\u4e00\u5ba2\u6236\u6aa2\u8996\uff0c\u907f\u514d\u5728\u540c\u4e00\u7246\u9762\u6df7\u5165\u591a\u5ba2\u6236\u5167\u5bb9\u3002",
+    "Grid 僅支援單一客戶檢視，模擬該帳號的貼文牆。",
   gridNeedClientSuggestion:
-    "\u8acb\u5728\u9801\u9762\u4e0a\u65b9\u300c\u7bc4\u570d\u300d\u9078\u64c7\u4e00\u500b\u5ba2\u6236\uff08\u6216\u8a72\u5ba2\u6236\u5e95\u4e0b\u7684\u54c1\u724c\uff0f\u5e33\u865f\uff09\u3002",
-  clientLabel: "\u5ba2\u6236\uff1a",
-  statusFilterLabel: "\u72c0\u614b",
-  planningOption: "\u898f\u5283\u4e2d\uff08\u9748\u611f\uff0f\u8349\u7a3f\uff09",
-  emptyGridTitle:
-    "\u6b64\u5ba2\u6236\u76ee\u524d\u6c92\u6709\u53ef\u986f\u793a\u7684 Instagram \u8cbc\u6587",
-  emptyGridReason:
-    "\u53ef\u80fd\u662f\u5c1a\u672a\u532f\u5165\uff0f\u5efa\u7acb\u5167\u5bb9\uff0c\u6216\u76ee\u524d\u72c0\u614b\u7be9\u9078\u6c92\u6709\u7b26\u5408\u9805\u76ee\u3002",
-  emptyGridSuggestion:
-    "\u8abf\u6574\u72c0\u614b\u7be9\u9078\u3001\u532f\u5165 Asana Ready Queue\uff0c\u6216\u5148\u624b\u52d5\u65b0\u589e\u8cbc\u6587\u3002",
-  noThumb: "\u5c1a\u672a\u8a2d\u5b9a\u4e3b\u8996\u89ba",
-  previewHint: "\u6aa2\u8996",
-  detailFallback: "\u5167\u5bb9\u8a73\u60c5",
-  clientField: "\u5ba2\u6236\uff1a",
-  scheduleField: "\u6392\u7a0b\uff1a",
-  statusField: "\u72c0\u614b\uff1a",
-  sourceField: "\u4f86\u6e90\uff1a",
-  editContent: "\u7de8\u8f2f\u5167\u5bb9",
-  close: "\u95dc\u9589",
+    "請在頁面上方「範圍」選擇一個客戶。",
+  clientLabel: "客戶：",
+  statusFilterLabel: "狀態",
+  planningOption: "規劃中（靈感／草稿）",
+  emptyGridTitle: "此客戶目前沒有可顯示的 Instagram 貼文",
+  emptyGridReason: "可能尚未匯入／建立內容，或狀態篩選沒有符合項目。",
+  emptyGridSuggestion: "調整狀態篩選、匯入 Ready Queue，或手動新增貼文。",
+  detailFallback: "內容詳情",
+  clientField: "客戶：",
+  scheduleField: "排程：",
+  statusField: "狀態：",
+  sourceField: "來源：",
+  editContent: "編輯內容",
+  close: "關閉",
 } as const
 
 type GridStatusFilter = "all" | "planning" | "scheduled" | "published"
@@ -56,10 +49,33 @@ function toPlanningStatus(status: ContentItem["status"]): GridStatusFilter {
   return "planning"
 }
 
-function getThumb(item: ContentItem): string | null {
-  const fromAttachment = item.attachments?.[0]?.url
+/** 牆面排序：新 → 舊（左上先放最新） */
+function sortKeyNewestFirst(item: ContentItem): number {
+  const raw =
+    item.plannedPublishDate ?? item.scheduledAt ?? item.updatedAt ?? item.createdAt
+  if (!raw) return 0
+  const t = new Date(raw).getTime()
+  return Number.isFinite(t) ? t : 0
+}
+
+export function getGridImageUrl(item: ContentItem): string | null {
+  const fromAttachment = item.attachments?.[0]?.url?.trim()
   if (fromAttachment) return fromAttachment
-  return item.thumbnail
+  return item.thumbnail?.trim() || null
+}
+
+function formatScheduleShort(value: string | null | undefined): string {
+  if (!value) return "—"
+  try {
+    return new Intl.DateTimeFormat("zh-TW", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(value))
+  } catch {
+    return value
+  }
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -80,15 +96,15 @@ function formatDate(value: string | null | undefined): string {
 function statusBadgeClasses(status: ContentStatus): string {
   switch (status) {
     case "idea":
-      return "border-amber-500/45 bg-amber-500/15 text-amber-100"
+      return "border-amber-500/45 bg-amber-500/20 text-amber-50"
     case "draft":
-      return "border-sky-500/40 bg-sky-500/12 text-sky-100"
+      return "border-sky-500/40 bg-sky-500/15 text-sky-50"
     case "scheduled":
-      return "border-violet-500/45 bg-violet-500/12 text-violet-100"
+      return "border-violet-500/45 bg-violet-500/15 text-violet-50"
     case "published":
-      return "border-emerald-500/45 bg-emerald-500/12 text-emerald-100"
+      return "border-emerald-500/45 bg-emerald-500/15 text-emerald-50"
     default:
-      return "border-border/60 bg-background/80 text-foreground"
+      return "border-border/60 bg-background/90 text-foreground"
   }
 }
 
@@ -96,6 +112,30 @@ function sourceLabel(item: ContentItem): string {
   if (item.source === "asana") return "Asana"
   if (item.source === "manual") return "Manual"
   return "Mock"
+}
+
+function GridTileImage({ url }: { url: string | null }) {
+  const [broken, setBroken] = React.useState(false)
+  if (!url || broken) {
+    return (
+      <div
+        className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-muted"
+        aria-hidden
+      >
+        <ImageIcon className="size-8 text-muted-foreground/50" />
+      </div>
+    )
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt=""
+      className="absolute inset-0 size-full object-cover"
+      loading="lazy"
+      onError={() => setBroken(true)}
+    />
+  )
 }
 
 export function InstagramGridView({
@@ -125,11 +165,9 @@ export function InstagramGridView({
     const byStatus =
       status === "all" ? base : base.filter((i) => toPlanningStatus(i.status) === status)
 
-    return [...byStatus].sort((a, b) => {
-      const da = new Date(a.plannedPublishDate ?? a.scheduledAt ?? a.updatedAt).getTime()
-      const db = new Date(b.plannedPublishDate ?? b.scheduledAt ?? b.updatedAt).getTime()
-      return db - da
-    })
+    return [...byStatus].sort(
+      (a, b) => sortKeyNewestFirst(b) - sortKeyNewestFirst(a),
+    )
   }, [items, selectedClient, status])
 
   function openItem(item: ContentItem) {
@@ -179,16 +217,10 @@ export function InstagramGridView({
             value={status}
             onChange={(e) => setStatus(e.target.value as GridStatusFilter)}
           >
-            <option value="all">
-              {"\u5168\u90e8"}
-            </option>
+            <option value="all">全部</option>
             <option value="planning">{t.planningOption}</option>
-            <option value="scheduled">
-              {"\u5df2\u6392\u7a0b"}
-            </option>
-            <option value="published">
-              {"\u5df2\u767c\u4f48"}
-            </option>
+            <option value="scheduled">已排程</option>
+            <option value="published">已發佈</option>
           </select>
         </div>
       </div>
@@ -201,85 +233,49 @@ export function InstagramGridView({
           suggestion={t.emptyGridSuggestion}
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {rows.map((item) => {
-            const thumb = getThumb(item)
-            const captionPreview = item.caption?.trim() || "—"
-            const isFlash = flashId === item.id
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => openItem(item)}
-                className={cn(
-                  "group border-border/60 bg-card/15 relative flex aspect-[4/5] w-full max-w-md flex-col overflow-hidden rounded-xl border text-left shadow-none transition",
-                  "hover:border-primary/45 hover:bg-card/25 focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
-                  "sm:max-w-none",
-                  isFlash &&
-                    "ring-primary/50 animate-pulse ring-2 ring-offset-2 ring-offset-background",
-                )}
-              >
-                <div className="relative min-h-0 flex-[58%] overflow-hidden bg-gradient-to-b from-muted/30 to-muted/5">
-                  {thumb ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={thumb}
-                      alt=""
-                      className="size-full object-cover transition duration-300 group-hover:scale-[1.03]"
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none"
-                      }}
-                    />
-                  ) : (
-                    <div className="text-muted-foreground/80 flex size-full flex-col items-center justify-center gap-2 px-4 text-center">
-                      <ImageIcon className="size-8 opacity-50" aria-hidden />
-                      <span className="text-[11px] leading-snug">{t.noThumb}</span>
-                    </div>
+        <div className="mx-auto w-full max-w-[min(100%,470px)]">
+          <div className="grid grid-cols-3 gap-1">
+            {rows.map((item) => {
+              const thumb = getGridImageUrl(item)
+              const schedule =
+                item.plannedPublishDate ?? item.scheduledAt ?? item.publishedAt
+              const isFlash = flashId === item.id
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => openItem(item)}
+                  className={cn(
+                    "group relative aspect-square w-full overflow-hidden bg-muted text-left outline-none",
+                    "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                    isFlash && "ring-primary/60 animate-pulse ring-2 ring-inset",
                   )}
-                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-background/90 via-background/20 to-transparent opacity-90" />
-                  <div className="absolute left-2 top-2 z-10 flex flex-wrap gap-1">
-                    <span className="rounded-md border border-white/15 bg-black/45 px-1.5 py-px text-[10px] font-medium text-white/95 backdrop-blur-sm">
-                      {contentPlatformLabel[item.platform]}
-                    </span>
+                  aria-label={`${item.title} · ${contentStatusLabel[item.status]}`}
+                >
+                  <GridTileImage url={thumb} />
+
+                  <div
+                    className={cn(
+                      "absolute inset-0 flex flex-col justify-end bg-black/50 p-2 opacity-0 transition-opacity",
+                      "group-hover:opacity-100 group-focus-visible:opacity-100",
+                    )}
+                  >
                     <span
                       className={cn(
-                        "rounded-md border px-1.5 py-px text-[10px] font-medium backdrop-blur-sm",
+                        "mb-1 w-fit rounded border px-1.5 py-0.5 text-[10px] font-medium",
                         statusBadgeClasses(item.status),
                       )}
                     >
                       {contentStatusLabel[item.status]}
                     </span>
-                  </div>
-                  <div className="absolute right-2 top-2 z-10 opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
-                    <span className="border-border/60 bg-background/90 text-foreground inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-medium shadow-sm backdrop-blur-sm">
-                      <PencilLine className="size-3" aria-hidden />
-                      {t.previewHint}
+                    <span className="text-[10px] font-medium tabular-nums text-white/95">
+                      {formatScheduleShort(schedule)}
                     </span>
                   </div>
-                </div>
-
-                <div className="border-border/50 flex min-h-0 flex-[42%] flex-col gap-1.5 border-t bg-card/35 p-2.5">
-                  <p className="text-foreground line-clamp-1 text-xs font-semibold leading-snug">
-                    {item.title}
-                  </p>
-                  <p className="text-muted-foreground line-clamp-3 text-[11px] leading-relaxed">
-                    {captionPreview}
-                  </p>
-                  <div className="text-muted-foreground mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-border/40 pt-2 text-[10px]">
-                    <span className="rounded border border-border/50 bg-muted/25 px-1.5 py-px">
-                      {item.contentTypeName?.trim() || contentPostTypeLabel[item.postType]}
-                    </span>
-                    <span className="tabular-nums">
-                      {formatDate(item.plannedPublishDate ?? item.scheduledAt)}
-                    </span>
-                    <span className="rounded border border-border/50 bg-background/60 px-1.5 py-px">
-                      {sourceLabel(item)}
-                    </span>
-                  </div>
-                </div>
-              </button>
-            )
-          })}
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
 
@@ -287,12 +283,20 @@ export function InstagramGridView({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{active?.title ?? t.detailFallback}</DialogTitle>
-            <DialogDescription className="text-xs">
-              {"Instagram Grid \u9805\u76ee\u8a73\u60c5"}
-            </DialogDescription>
+            <DialogDescription className="text-xs">Instagram 貼文詳情</DialogDescription>
           </DialogHeader>
           {active ? (
             <div className="space-y-2 text-sm">
+              {getGridImageUrl(active) ? (
+                <div className="bg-muted relative aspect-square w-full max-w-sm overflow-hidden rounded-md">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={getGridImageUrl(active)!}
+                    alt=""
+                    className="size-full object-cover"
+                  />
+                </div>
+              ) : null}
               <p className="text-muted-foreground text-xs">
                 {t.clientField}
                 <span className="text-foreground">{active.clientName ?? "—"}</span>
@@ -312,11 +316,7 @@ export function InstagramGridView({
                 <span className="text-foreground">{sourceLabel(active)}</span>
               </p>
               <p className="text-muted-foreground text-xs">
-                Position：
-                <span className="text-foreground">{active.position ?? "—"}</span>
-              </p>
-              <p className="text-muted-foreground text-xs">
-                {"\u9644\u4ef6\uff1a"}
+                附件：
                 <span className="text-foreground">{active.attachments?.length ?? 0}</span>
               </p>
               <div className="border-border/60 bg-muted/20 rounded-md border p-2">
