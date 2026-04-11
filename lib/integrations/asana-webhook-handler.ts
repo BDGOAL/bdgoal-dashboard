@@ -3,7 +3,10 @@ import { createHmac, timingSafeEqual } from "node:crypto"
 import { createClient } from "@supabase/supabase-js"
 
 import { fetchAsanaReadyItemByTaskId } from "@/lib/integrations/asana"
-import { mapAsanaReadyToStoredContentItem } from "@/lib/content/store"
+import {
+  ensureClientRecordByNameForService,
+  mapAsanaReadyToStoredContentItem,
+} from "@/lib/content/store"
 
 type AsanaEvent = {
   action?: string
@@ -49,33 +52,6 @@ function eventInAllowedProjects(event: AsanaEvent, allowlist: string[]) {
   return allowlist.includes(parentGid)
 }
 
-async function resolveClientIdFromName(clientValue: string) {
-  const supabase = getServiceSupabaseClient()
-  const trimmed = clientValue.trim()
-  const { data: byId } = await supabase
-    .from("clients")
-    .select("id")
-    .eq("id", trimmed)
-    .maybeSingle()
-  if (byId?.id) return byId.id
-
-  const { data: byName } = await supabase
-    .from("clients")
-    .select("id")
-    .eq("name", trimmed)
-    .maybeSingle()
-  if (byName?.id) return byName.id
-
-  const slug = trimmed.toLowerCase().replace(/\s+/g, "-")
-  const { data: bySlug } = await supabase
-    .from("clients")
-    .select("id")
-    .eq("slug", slug)
-    .maybeSingle()
-  if (bySlug?.id) return bySlug.id
-  return trimmed
-}
-
 async function deleteAsanaTaskFromSupabase(asanaTaskId: string) {
   const supabase = getServiceSupabaseClient()
   const { data: existing } = await supabase
@@ -103,8 +79,11 @@ async function upsertAsanaTaskToSupabase(asanaTaskId: string) {
   }
 
   const incoming = mapAsanaReadyToStoredContentItem(ready)
-  const clientId = await resolveClientIdFromName(incoming.client)
   const supabase = getServiceSupabaseClient()
+  const clientId = await ensureClientRecordByNameForService(
+    supabase,
+    incoming.client,
+  )
   const { data: existing } = await supabase
     .from("content_items")
     .select("*")
