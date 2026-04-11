@@ -13,9 +13,8 @@ import { Card } from "@/components/ui/card"
 import { EmptyState } from "@/components/dashboard/empty-state"
 import { useWorkspaceScope } from "@/components/dashboard/workspace-scope-context"
 import { contentPlatformLabel } from "@/lib/calendar/labels"
-import { mockCompetitors } from "@/lib/mock/competitors"
 import { filterCompetitorsByScope } from "@/lib/scope/filter-competitors"
-import type { CompetitorTrend } from "@/lib/types/competitor"
+import type { CompetitorRecord, CompetitorTrend } from "@/lib/types/competitor"
 import { cn } from "@/lib/utils"
 
 type SortKey =
@@ -50,9 +49,22 @@ function TrendIcon({ t }: { t: CompetitorTrend }) {
 
 export function CompetitorTracker() {
   const { scope } = useWorkspaceScope()
+  const [competitors, setCompetitors] = React.useState<CompetitorRecord[]>([])
+
+  React.useEffect(() => {
+    let cancelled = false
+    void import("@/lib/mock/competitors").then((m) => {
+      if (cancelled) return
+      setCompetitors(m.mockCompetitors)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const filtered = React.useMemo(
-    () => filterCompetitorsByScope(mockCompetitors, scope),
-    [scope],
+    () => filterCompetitorsByScope(competitors, scope),
+    [competitors, scope],
   )
 
   const [sort, setSort] = React.useState<{
@@ -136,8 +148,8 @@ export function CompetitorTracker() {
       ) : (
         <div className="overflow-x-auto rounded-lg border">
           <table className="w-full min-w-[900px] text-left text-xs">
-            <thead>
-              <tr className="bg-muted/30 border-b text-[11px]">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-muted/90 border-b text-[11px] backdrop-blur-sm">
                 <th className="w-8 px-2 py-2" />
                 <SortTh
                   label="競品"

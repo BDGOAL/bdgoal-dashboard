@@ -1,12 +1,10 @@
-import type { SocialAccount } from "@/lib/types/agency"
-import type { WorkspaceScope } from "@/lib/types/agency"
+import type { SocialAccount, WorkspaceScope } from "@/lib/types/agency"
 import type {
   AnalyticsSnapshot,
   FollowerTrendPoint,
   PerformanceByPeriodRow,
   TopPerformingPost,
 } from "@/lib/types/analytics"
-import { mockSocialAccounts } from "@/lib/mock/agency"
 
 function seed(id: string, salt = ""): number {
   let h = 0
@@ -147,23 +145,47 @@ export function aggregateSnapshots(snapshots: AnalyticsSnapshot[]): AnalyticsSna
   }
 }
 
+function syntheticAccountForScope(scope: WorkspaceScope): SocialAccount | null {
+  if (scope.mode === "account") {
+    return {
+      id: scope.accountId,
+      name: "帳號範圍",
+      platform: "instagram",
+      handle: "",
+      clientId: "",
+      brandId: "",
+    }
+  }
+  if (scope.mode === "client") {
+    return {
+      id: `scope-client-${scope.clientId}`,
+      name: "客戶範圍",
+      platform: "instagram",
+      handle: "",
+      clientId: scope.clientId,
+      brandId: `br-${scope.clientId}`,
+    }
+  }
+  if (scope.mode === "brand") {
+    return {
+      id: `scope-brand-${scope.brandId}`,
+      name: "品牌範圍",
+      platform: "instagram",
+      handle: "",
+      clientId: "",
+      brandId: scope.brandId,
+    }
+  }
+  return null
+}
+
 export function resolveAnalyticsForScope(
   base: AnalyticsSnapshot,
   scope: WorkspaceScope,
 ): AnalyticsSnapshot {
   if (scope.mode === "all") return base
 
-  if (scope.mode === "account") {
-    const acc = mockSocialAccounts.find((a) => a.id === scope.accountId)
-    if (!acc) return base
-    return deriveAccountSnapshot(base, acc)
-  }
-
-  const subset = mockSocialAccounts.filter((a) => {
-    if (scope.mode === "client") return a.clientId === scope.clientId
-    return a.brandId === scope.brandId
-  })
-  if (subset.length === 0) return base
-  const derived = subset.map((a) => deriveAccountSnapshot(base, a))
-  return aggregateSnapshots(derived)
+  const synthetic = syntheticAccountForScope(scope)
+  if (!synthetic) return base
+  return deriveAccountSnapshot(base, synthetic)
 }

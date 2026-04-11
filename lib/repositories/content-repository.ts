@@ -1,5 +1,10 @@
-import { mockClients, mockSocialAccounts } from "@/lib/mock/agency"
-import { mockContentItems } from "@/lib/mock/content"
+/**
+ * Dashboard 內容列讀取：`content_items` → `ContentItem`。
+ *
+ * - **Asana 真實對應**僅經由 DB 中已由匯入流程寫入的欄位（client／platform／content_type／position／日期／caption 等），
+ *   見 `lib/asana-dashboard-field-semantics.ts` 總述。
+ * - `brandId`／`accountId` 於 `mapDbRowToDashboard` 由 `pickScopeIds` 填入，**非** Asana 來源。
+ */
 import type { ContentItem, ContentPlatform, ContentPostType } from "@/lib/types/dashboard"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
 
@@ -41,12 +46,16 @@ function normalizePostType(input: string): ContentPostType {
   return "feed"
 }
 
+/**
+ * 產生 `ContentItem` 上與 WorkspaceScope 比對用的 `brandId`／`accountId`。
+ * **Asana 沒有 brand／account 欄位**；此處以 `clients.id` + platform 合成穩定 id，供頂端範圍篩選對齊。
+ */
 function pickScopeIds(clientId: string, platform: ContentPlatform) {
-  const acc =
-    mockSocialAccounts.find((a) => a.clientId === clientId && a.platform === platform) ??
-    mockSocialAccounts.find((a) => a.clientId === clientId)
-  if (acc) return { clientId: acc.clientId, brandId: acc.brandId, accountId: acc.id }
-  return { clientId, brandId: "br-imported", accountId: `acc-imported-${platform}` }
+  return {
+    clientId,
+    brandId: `br-${clientId}`,
+    accountId: `acc-${clientId}-${platform}`,
+  }
 }
 
 function mapDbRowToDashboard(
@@ -57,10 +66,7 @@ function mapDbRowToDashboard(
   const platform = normalizePlatform(row.platform)
   if (!platform) return null
   const refs = pickScopeIds(row.client_id, platform)
-  const clientName =
-    clientNameMap[row.client_id] ??
-    mockClients.find((c) => c.id === row.client_id)?.name ??
-    row.client_id
+  const clientName = clientNameMap[row.client_id] ?? row.client_id
   return {
     id: row.id,
     source: row.source,
@@ -90,7 +96,10 @@ function mapDbRowToDashboard(
 }
 
 export async function listDashboardContentItems(): Promise<ContentItem[]> {
-  if (process.env.CONTENT_DATA_MODE === "mock") return mockContentItems
+  if (process.env.CONTENT_DATA_MODE === "mock") {
+    const { mockContentItems } = await import("@/lib/mock/content")
+    return mockContentItems
+  }
   const supabase = await createSupabaseServerClient()
   const { data: rows, error } = await supabase
     .from("content_items")
@@ -98,21 +107,33 @@ export async function listDashboardContentItems(): Promise<ContentItem[]> {
     .order("updated_at", { ascending: false })
   if (error) throw new Error(`讀取 content_items 失敗：${error.message}`)
 
-  const clientIds = Array.from(new Set((rows ?? []).map((r) => r.client_id)))
-  const { data: clients } = await supabase
-    .from("clients")
-    .select("id,name")
-    .in("id", clientIds.length ? clientIds : ["__none__"])
-  const clientNameMap = Object.fromEntries((clients ?? []).map((c) => [c.id, c.name]))
+  const rowList = rows ?? []
+  if (!rowList.length) return []
 
-  const ids = (rows ?? []).map((r) => r.id)
-  if (!ids.length) return []
-  const { data: atts, error: attErr } = await supabase
-    .from("content_attachments")
-    .select("id, content_item_id, url, type, sort_order")
-          .in("content_item_id", ids)
-    .order("sort_order", { ascending: true })
+  const clientIds = Array.from(new Set(rowList.map((r) => r.client_id)))
+  const ids = rowList.map((r) => r.id)
+
+  const [{ data: clients, error: clientsError }, { data: atts, error: attErr }] =
+    await Promise.all([
+      supabase
+        .from("clients")
+        .select("id,name")
+        .in("id", clientIds.length ? clientIds : ["__none__"]),
+      supabase
+        .from("content_attachments")
+        .select("id, content_item_id, url, type, sort_order")
+        .in("content_item_id", ids)
+        .order("sort_order", { ascending: true }),
+    ])
+
+  if (clientsError) {
+    throw new Error(`讀取 clients 失敗：${clientsError.message}`)
+  }
   if (attErr) throw new Error(`讀取 attachments 失敗：${attErr.message}`)
+
+  const clientNameMap = Object.fromEntries(
+    (clients ?? []).map((c) => [c.id, c.name]),
+  )
 
   const byItem = new Map<string, Array<{ name: string; url: string }>>()
   for (const a of atts ?? []) {
@@ -121,10 +142,42 @@ export async function listDashboardContentItems(): Promise<ContentItem[]> {
     byItem.set(a.content_item_id, arr)
   }
 
-  return (rows ?? [])
+  return rowList
     .map((r) =>
       mapDbRowToDashboard(r as DbContentItem, clientNameMap, byItem.get(r.id) ?? []),
     )
     .filter((x): x is ContentItem => Boolean(x))
+}
+
+/**
+ * Schema 無獨立 `account` 欄位：以該客戶＋平台下曾出現的 `position` 值代表帳號／欄位槽，供 {@link socialAccountsFromPositionHints} 使用。
+ */
+export async function fetchDistinctPositionsForClientPlatform(
+  clientId: string,
+  platform: ContentPlatform,
+): Promise<string[]> {
+  const supabase = await createSupabaseServerClient()
+  const { data, error } = await supabase
+    .from("content_items")
+    .select("position")
+    .eq("client_id", clientId)
+    .eq("platform", platform)
+
+  if (error) {
+    console.error(
+      "[content-repository] fetchDistinctPositionsForClientPlatform:",
+      error.message,
+    )
+    return []
+  }
+
+  const seen = new Set<string>()
+  for (const row of data ?? []) {
+    const p = row.position
+    if (p != null && String(p).trim() !== "") {
+      seen.add(String(p).trim())
+    }
+  }
+  return [...seen]
 }
 

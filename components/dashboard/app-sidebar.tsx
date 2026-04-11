@@ -12,7 +12,7 @@ import {
   Users,
 } from "lucide-react"
 
-import { dashboardNavItems } from "@/lib/mock/navigation"
+import { dashboardNavItems } from "@/lib/navigation/dashboard-nav"
 import {
   Sidebar,
   SidebarContent,

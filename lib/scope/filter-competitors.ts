@@ -1,12 +1,12 @@
 import type { SocialAccount } from "@/lib/types/agency"
 import type { WorkspaceScope } from "@/lib/types/agency"
 import type { CompetitorRecord } from "@/lib/types/competitor"
-import { mockSocialAccounts } from "@/lib/mock/agency"
 
 export function filterCompetitorsByScope(
   competitors: CompetitorRecord[],
   scope: WorkspaceScope,
-  accounts: SocialAccount[] = mockSocialAccounts,
+  /** 帳號→品牌對照；空陣列時 account 範圍無法解析品牌 */
+  accounts: SocialAccount[] = [],
 ): CompetitorRecord[] {
   if (scope.mode === "all") return competitors
 

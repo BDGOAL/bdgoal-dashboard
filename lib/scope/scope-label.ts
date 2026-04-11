@@ -1,45 +1,51 @@
 import type { WorkspaceScope } from "@/lib/types/agency"
-import { mockBrands, mockClients, mockSocialAccounts } from "@/lib/mock/agency"
-import { contentPlatformLabel } from "@/lib/calendar/labels"
+import type { ContentItem } from "@/lib/types/dashboard"
+
+function clientNameFromContentItems(
+  scope: WorkspaceScope,
+  contentItems: ContentItem[] | undefined,
+): string | null {
+  if (scope.mode !== "client" || !contentItems?.length) return null
+  const hit = contentItems.find((i) => i.clientId === scope.clientId)
+  const n = hit?.clientName?.trim()
+  return n || null
+}
 
 /** Short label for filter chips and hints */
-export function getScopeShortLabel(scope: WorkspaceScope): string {
+export function getScopeShortLabel(
+  scope: WorkspaceScope,
+  contentItems?: ContentItem[],
+): string {
   if (scope.mode === "all") return "全部客戶"
 
   if (scope.mode === "client") {
-    const c = mockClients.find((x) => x.id === scope.clientId)
-    return c?.name ?? "客戶"
+    const fromData = clientNameFromContentItems(scope, contentItems)
+    if (fromData) return fromData
+    return `客戶 · ${scope.clientId.slice(0, 8)}…`
   }
 
   if (scope.mode === "brand") {
-    const b = mockBrands.find((x) => x.id === scope.brandId)
-    const c = b ? mockClients.find((x) => x.id === b.clientId) : undefined
-    if (b && c) return `${c.name} · ${b.name}`
-    return b?.name ?? "品牌"
+    return `品牌 · ${scope.brandId.slice(0, 12)}…`
   }
 
-  const a = mockSocialAccounts.find((x) => x.id === scope.accountId)
-  if (a) return `${a.handle} · ${contentPlatformLabel[a.platform]}`
-  return "帳號"
+  return `帳號 · ${scope.accountId.slice(0, 12)}…`
 }
 
 /** One-line description for page intros */
-export function getScopeLine(scope: WorkspaceScope): string {
+export function getScopeLine(
+  scope: WorkspaceScope,
+  contentItems?: ContentItem[],
+): string {
   if (scope.mode === "all") {
-    return "目前顯示所有客戶、品牌與社群帳號的資料。"
+    return "目前顯示所有可存取客戶的內容與指標。"
   }
   if (scope.mode === "client") {
-    const c = mockClients.find((x) => x.id === scope.clientId)
-    return `僅顯示與「${c?.name ?? "此客戶"}」相關的內容與指標。`
+    const fromData = clientNameFromContentItems(scope, contentItems)
+    const label = fromData ?? `客戶（${scope.clientId.slice(0, 8)}…）`
+    return `僅顯示與「${label}」相關的內容與指標。`
   }
   if (scope.mode === "brand") {
-    const b = mockBrands.find((x) => x.id === scope.brandId)
-    const c = b ? mockClients.find((x) => x.id === b.clientId) : undefined
-    return `僅顯示與「${c?.name ? `${c.name} · ` : ""}${b?.name ?? "此品牌"}」相關的資料。`
+    return `僅顯示與所選品牌範圍（${scope.brandId.slice(0, 12)}…）相關的資料。`
   }
-  const a = mockSocialAccounts.find((x) => x.id === scope.accountId)
-  if (a) {
-    return `對應品牌「${mockBrands.find((b) => b.id === a.brandId)?.name ?? ""}」：顯示與此帳號同層級的內容與分析。`
-  }
-  return "請在頂端選擇有效的工作區範圍。"
+  return `僅顯示與所選社群帳號範圍（${scope.accountId.slice(0, 12)}…）相關的內容與分析。`
 }

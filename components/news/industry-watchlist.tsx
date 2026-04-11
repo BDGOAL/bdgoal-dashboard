@@ -14,8 +14,6 @@ import {
   newsTopicLabel,
   relevanceLabel,
 } from "@/lib/news/labels"
-import { mockBrands, mockClients } from "@/lib/mock/agency"
-import { mockNewsItems } from "@/lib/mock/news"
 import {
   NEWS_TIME_WINDOW_LABEL,
   type NewsTimeWindow,
@@ -32,12 +30,8 @@ import {
   type NewsSignalType,
   type NewsTopic,
 } from "@/lib/types/news"
+import { dashboardSelectNarrowClassName } from "@/lib/dashboard/form-controls"
 import { cn } from "@/lib/utils"
-
-const selectClass = cn(
-  "border-input bg-background dark:bg-input/30 h-8 max-w-[140px] rounded-md border px-2 text-xs shadow-none outline-none",
-  "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-2",
-)
 
 function formatDate(iso: string) {
   try {
@@ -51,19 +45,15 @@ function formatDate(iso: string) {
   }
 }
 
+/** 標籤以 id 顯示；真實名稱應由未來 /api/clients 對照補上。 */
 function relatedLabel(item: NewsItem): string {
   if (item.clientIds.length === 0 && item.brandIds.length === 0) {
     return "全客戶／內部"
   }
-  const parts: string[] = []
-  for (const cid of item.clientIds) {
-    const c = mockClients.find((x) => x.id === cid)
-    if (c) parts.push(c.name)
-  }
-  for (const bid of item.brandIds) {
-    const b = mockBrands.find((x) => x.id === bid)
-    if (b) parts.push(b.name)
-  }
+  const parts: string[] = [
+    ...item.clientIds.map((id) => id.slice(0, 12)),
+    ...item.brandIds.map((id) => id.slice(0, 12)),
+  ]
   return parts.length ? parts.join(" · ") : "—"
 }
 
@@ -71,6 +61,19 @@ const TIME_WINDOWS: NewsTimeWindow[] = ["today", "7d", "week", "all"]
 
 export function IndustryWatchlist() {
   const { scope } = useWorkspaceScope()
+  const [newsItems, setNewsItems] = React.useState<NewsItem[]>([])
+
+  React.useEffect(() => {
+    let cancelled = false
+    void import("@/lib/mock/news").then((m) => {
+      if (cancelled) return
+      setNewsItems(m.mockNewsItems)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const [topic, setTopic] = React.useState<NewsTopic | "all">("all")
   const [followUp, setFollowUp] = React.useState<FollowUpPriority | "all">(
     "all",
@@ -79,8 +82,8 @@ export function IndustryWatchlist() {
   const [timeWindow, setTimeWindow] = React.useState<NewsTimeWindow>("7d")
 
   const scoped = React.useMemo(
-    () => filterNewsByScope(mockNewsItems, scope),
-    [scope],
+    () => filterNewsByScope(newsItems, scope),
+    [newsItems, scope],
   )
 
   const afterTopicFilters = React.useMemo(() => {
@@ -246,7 +249,7 @@ function FilterSelect({
       </label>
       <select
         id={id}
-        className={selectClass}
+        className={dashboardSelectNarrowClassName}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       >

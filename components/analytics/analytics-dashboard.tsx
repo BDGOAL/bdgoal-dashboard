@@ -15,13 +15,17 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ContentOpsPanel } from "@/components/analytics/content-ops-panel"
 import { EmptyState } from "@/components/dashboard/empty-state"
 import { FilterActiveChips } from "@/components/dashboard/filter-active-chips"
-import type { AnalyticsDateRange, TopPerformingPost } from "@/lib/types/analytics"
-import {
-  ANALYTICS_RANGE_OPTIONS,
-  getAnalyticsSnapshot,
-} from "@/lib/mock/analytics"
+import type {
+  AnalyticsDateRange,
+  AnalyticsSnapshot,
+  PerformanceByPeriodRow,
+  TopPerformingPost,
+} from "@/lib/types/analytics"
+import type { ContentItem } from "@/lib/types/dashboard"
+import { ANALYTICS_RANGE_OPTIONS } from "@/lib/analytics/range-options"
 import { getScopeShortLabel } from "@/lib/scope/scope-label"
 import { useWorkspaceScope } from "@/components/dashboard/workspace-scope-context"
 import { contentPlatformLabel } from "@/lib/calendar/labels"
@@ -51,38 +55,63 @@ function formatShortDate(iso: string) {
   }
 }
 
-export function AnalyticsDashboard() {
+export function AnalyticsDashboard({ items }: { items: ContentItem[] }) {
   const { scope } = useWorkspaceScope()
   const [range, setRange] = React.useState<AnalyticsDateRange>("30d")
-  const snapshot = React.useMemo(
-    () => getAnalyticsSnapshot(range, scope),
-    [range, scope],
-  )
-  const { kpis, performanceByPeriod, followerTrend, topPosts } = snapshot
+  const [snapshot, setSnapshot] = React.useState<AnalyticsSnapshot | null>(null)
 
-  const barData = React.useMemo(
-    () =>
-      performanceByPeriod.map((r) => ({
-        ...r,
-        impressionsK: Math.round(r.impressions / 1000),
-      })),
-    [performanceByPeriod],
-  )
+  React.useEffect(() => {
+    let cancelled = false
+    void import("@/lib/mock/analytics").then((m) => {
+      if (cancelled) return
+      setSnapshot(m.getAnalyticsSnapshot(range, scope))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [range, scope])
 
-  const lineData = React.useMemo(
-    () =>
-      followerTrend.map((p) => ({
-        ...p,
-        label: p.date.slice(5),
-      })),
-    [followerTrend],
-  )
+  const kpis = snapshot?.kpis
+
+  const barData = React.useMemo(() => {
+    const performanceByPeriod = snapshot?.performanceByPeriod ?? []
+    return performanceByPeriod.map((r) => ({
+      ...r,
+      impressionsK: Math.round(r.impressions / 1000),
+    }))
+  }, [snapshot])
+
+  const lineData = React.useMemo(() => {
+    const followerTrend = snapshot?.followerTrend ?? []
+    return followerTrend.map((p) => ({
+      ...p,
+      label: p.date.slice(5),
+    }))
+  }, [snapshot])
+
+  const topPosts = snapshot?.topPosts ?? []
 
   const rangeLabel =
     ANALYTICS_RANGE_OPTIONS.find((o) => o.value === range)?.label ?? range
 
+  if (!kpis) {
+    return (
+      <div className="flex flex-col gap-6">
+        <ContentOpsPanel items={items} />
+        <p className="text-muted-foreground text-xs">載入分析示範資料…</p>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6">
+      <ContentOpsPanel items={items} />
+
+      <div className="border-border/55 bg-muted/10 relative rounded-xl border border-dashed p-4 pt-6">
+        <span className="bg-background text-muted-foreground absolute -top-2.5 left-3 rounded border border-border/60 px-2 py-0.5 text-[10px] font-medium">
+          演示：社群成效（mock）
+        </span>
+        <div className="flex flex-col gap-4">
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         <KpiCard
           label="總曝光"
@@ -132,7 +161,7 @@ export function AnalyticsDashboard() {
         <FilterActiveChips
           items={[
             {
-              label: `範圍 · ${getScopeShortLabel(scope)}`,
+              label: `範圍 · ${getScopeShortLabel(scope, items)}`,
               active: true,
             },
             { label: `期間 · ${rangeLabel}`, active: true },
@@ -174,7 +203,7 @@ export function AnalyticsDashboard() {
                     content={({ active, payload, label }) => {
                       if (!active || !payload?.length) return null
                       const row = payload[0]?.payload as
-                        | (typeof performanceByPeriod)[0]
+                        | PerformanceByPeriodRow
                         | undefined
                       if (!row) return null
                       return (
@@ -266,7 +295,9 @@ export function AnalyticsDashboard() {
         </Card>
       </div>
 
-      <TopPostsTable posts={topPosts} scopeLabel={getScopeShortLabel(scope)} />
+      <TopPostsTable posts={topPosts} scopeLabel={getScopeShortLabel(scope, items)} />
+        </div>
+      </div>
     </div>
   )
 }

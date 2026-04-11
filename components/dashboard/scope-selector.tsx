@@ -2,8 +2,6 @@
 
 import * as React from "react"
 
-import { mockBrands, mockClients, mockSocialAccounts } from "@/lib/mock/agency"
-import { contentPlatformLabel } from "@/lib/calendar/labels"
 import { parseScope, serializeScope } from "@/lib/scope/serialize"
 import { useWorkspaceScope } from "@/components/dashboard/workspace-scope-context"
 import { cn } from "@/lib/utils"
@@ -13,9 +11,60 @@ const selectClass = cn(
   "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-2",
 )
 
+type ApiClientRow = { id: string; name: string }
+
 export function ScopeSelector() {
   const { scope, setScope } = useWorkspaceScope()
   const value = serializeScope(scope)
+
+  const [apiClients, setApiClients] = React.useState<ApiClientRow[] | null>(null)
+  const [loadFailed, setLoadFailed] = React.useState(false)
+
+  React.useEffect(() => {
+    let cancelled = false
+    fetch("/api/clients", { cache: "no-store" })
+      .then(async (res) => {
+        const json = (await res.json()) as { clients?: ApiClientRow[]; error?: string }
+        if (!res.ok) {
+          console.error("[ScopeSelector] GET /api/clients failed:", res.status, json.error)
+          return []
+        }
+        return json.clients ?? []
+      })
+      .then((rows) => {
+        if (!cancelled) {
+          setApiClients(rows)
+          setLoadFailed(false)
+        }
+      })
+      .catch((e) => {
+        console.error("[ScopeSelector] GET /api/clients error:", e)
+        if (!cancelled) {
+          setApiClients([])
+          setLoadFailed(true)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const loading = apiClients === null
+  const clientOptions = React.useMemo(() => apiClients ?? [], [apiClients])
+
+  React.useEffect(() => {
+    if (loading || !clientOptions.length) return
+    setScope((prev) => {
+      if (prev.mode === "brand" || prev.mode === "account") return { mode: "all" }
+      if (
+        prev.mode === "client" &&
+        !clientOptions.some((c) => c.id === prev.clientId)
+      ) {
+        return { mode: "all" }
+      }
+      return prev
+    })
+  }, [clientOptions, loading, setScope])
 
   return (
     <label className="flex min-w-0 max-w-full flex-1 items-center gap-2 sm:max-w-[min(100%,300px)]">
@@ -26,37 +75,24 @@ export function ScopeSelector() {
         className={selectClass}
         value={value}
         onChange={(e) => setScope(parseScope(e.target.value))}
+        disabled={loading}
         aria-label="工作區範圍"
+        aria-busy={loading}
       >
         <option value="all">全部客戶</option>
         <optgroup label="客戶">
-          {mockClients.map((c) => (
+          {clientOptions.map((c) => (
             <option key={c.id} value={serializeScope({ mode: "client", clientId: c.id })}>
               {c.name}
             </option>
           ))}
         </optgroup>
-        <optgroup label="品牌">
-          {mockBrands.map((b) => {
-            const client = mockClients.find((c) => c.id === b.clientId)
-            return (
-              <option key={b.id} value={serializeScope({ mode: "brand", brandId: b.id })}>
-                {client?.name ?? ""} · {b.name}
-              </option>
-            )
-          })}
-        </optgroup>
-        <optgroup label="社群帳號">
-          {mockSocialAccounts.map((a) => (
-            <option
-              key={a.id}
-              value={serializeScope({ mode: "account", accountId: a.id })}
-            >
-              {a.handle} · {contentPlatformLabel[a.platform]}
-            </option>
-          ))}
-        </optgroup>
       </select>
+      {loadFailed ? (
+        <span className="text-destructive sr-only">
+          客戶列表載入失敗（已記錄於 console）
+        </span>
+      ) : null}
     </label>
   )
 }

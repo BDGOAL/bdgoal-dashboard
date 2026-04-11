@@ -2,7 +2,6 @@ import type { Brand } from "@/lib/types/agency"
 import type { SocialAccount } from "@/lib/types/agency"
 import type { WorkspaceScope } from "@/lib/types/agency"
 import type { NewsItem } from "@/lib/types/news"
-import { mockBrands, mockSocialAccounts } from "@/lib/mock/agency"
 
 function isAgencyWideBriefing(item: NewsItem): boolean {
   return item.clientIds.length === 0 && item.brandIds.length === 0
@@ -18,8 +17,8 @@ function brandBelongsToClient(brandId: string, clientId: string, brands: Brand[]
 export function filterNewsByScope(
   items: NewsItem[],
   scope: WorkspaceScope,
-  brands: Brand[] = mockBrands,
-  accounts: SocialAccount[] = mockSocialAccounts,
+  brands: Brand[] = [],
+  accounts: SocialAccount[] = [],
 ): NewsItem[] {
   if (scope.mode === "all") {
     return items

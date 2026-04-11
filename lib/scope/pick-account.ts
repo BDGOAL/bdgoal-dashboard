@@ -1,20 +1,46 @@
 import type { SocialAccount, WorkspaceScope } from "@/lib/types/agency"
 import type { ContentPlatform } from "@/lib/types/dashboard"
 
-/** Pick which social account new editorial content should attach to for the current scope. */
+function hashSlot(s: string): string {
+  let h = 0
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+  return h.toString(16).slice(0, 10)
+}
+
+/**
+ * 由 `content_items` 查到的 distinct `position` 產生候選 `SocialAccount`（id 為穩定合成，**非** DB 主鍵）。
+ * 若無任何 position，候選為空，呼叫端應請使用者手動輸入／改選範圍。
+ */
+export function socialAccountsFromPositionHints(
+  clientId: string,
+  platform: ContentPlatform,
+  distinctPositions: string[],
+): SocialAccount[] {
+  const brandId = `br-${clientId}`
+  return distinctPositions.map((pos) => ({
+    id: `acc-${clientId}-${platform}-${hashSlot(pos)}`,
+    name: pos,
+    platform,
+    handle: pos,
+    clientId,
+    brandId,
+  }))
+}
+
+/**
+ * 從真實候選帳號列挑一筆；若無候選回傳 `null`（勿寫入示範用 mock id）。
+ */
 export function pickAccountForNewPost(
   scope: WorkspaceScope,
   platform: ContentPlatform,
-  accounts: SocialAccount[],
-): SocialAccount {
-  const pool = accounts.filter((a) => a.platform === platform)
-  if (pool.length === 0) {
-    throw new Error(`No mock account for platform ${platform}`)
-  }
+  candidates: SocialAccount[],
+): SocialAccount | null {
+  const pool = candidates.filter((a) => a.platform === platform)
+  if (pool.length === 0) return null
 
   if (scope.mode === "account") {
-    const hit = accounts.find((a) => a.id === scope.accountId)
-    if (hit && hit.platform === platform) return hit
+    const hit = pool.find((a) => a.id === scope.accountId)
+    if (hit) return hit
   }
 
   if (scope.mode === "brand") {
@@ -27,5 +53,5 @@ export function pickAccountForNewPost(
     if (hit) return hit
   }
 
-  return pool[0]
+  return pool[0] ?? null
 }
