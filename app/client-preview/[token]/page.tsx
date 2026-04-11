@@ -20,7 +20,7 @@ export default async function ClientPreviewPage({
   const token = (await params).token
   const preview = await getPreviewByToken(token)
   if (!preview) return notFound()
-  if (preview.expires_at && new Date(preview.expires_at).getTime() < Date.now()) {
+  if (preview.expires_at && new Date(preview.expires_at) < new Date()) {
     return <main className="p-8 text-sm">此預覽連結已過期。</main>
   }
 

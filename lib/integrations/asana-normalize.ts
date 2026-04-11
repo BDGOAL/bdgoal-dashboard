@@ -1,3 +1,9 @@
+/**
+ * Asana 主任務經正規化後的結構：欄位僅對應專案既有 custom fields（見 `ASANA_FIELD_NAMES`）。
+ * **不包含** brand、social account、handle——若其他模組需要這類維度，須標明為 Dashboard 內部推導，不可假設 Asana 提供。
+ *
+ * @see `lib/asana-dashboard-field-semantics.ts` 欄位語意總述
+ */
 export type AsanaReadyItem = {
   source: "asana"
   asanaTaskId: string

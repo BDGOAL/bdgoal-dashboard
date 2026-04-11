@@ -1,3 +1,5 @@
+import type { LucideIcon } from "lucide-react"
+
 import { cn } from "@/lib/utils"
 
 type EmptyStateProps = {
@@ -7,6 +9,8 @@ type EmptyStateProps = {
   /** What to try next. */
   suggestion: string
   className?: string
+  /** Optional icon for visual consistency across pages. */
+  icon?: LucideIcon
 }
 
 /**
@@ -17,6 +21,7 @@ export function EmptyState({
   reason,
   suggestion,
   className,
+  icon: Icon,
 }: EmptyStateProps) {
   return (
     <div
@@ -26,6 +31,12 @@ export function EmptyState({
         className,
       )}
     >
+      {Icon ? (
+        <Icon
+          className="text-muted-foreground/70 mx-auto mb-3 size-8 stroke-[1.25]"
+          aria-hidden
+        />
+      ) : null}
       <p className="text-foreground text-sm font-medium">{title}</p>
       <p className="mt-2 text-xs leading-relaxed">{reason}</p>
       <p className="mt-3 text-xs leading-relaxed">{suggestion}</p>

@@ -17,13 +17,13 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
   CONTENT_POST_TYPES,
+  type ContentItem,
   type ContentPostType,
 } from "@/lib/types/dashboard"
 import {
   contentPostTypeLabel,
 } from "@/lib/instagram/labels"
-import { mockClients, mockSocialAccounts } from "@/lib/mock/agency"
-import { pickAccountForNewPost } from "@/lib/scope/pick-account"
+import { resolveClientLabelForNewPost } from "@/lib/scope/resolve-client-label-for-new-post"
 import { useWorkspaceScope } from "@/components/dashboard/workspace-scope-context"
 import { cn } from "@/lib/utils"
 import {
@@ -32,6 +32,11 @@ import {
   toPlannedPublishDateIso,
   validateStatusAndScheduledAt,
 } from "@/components/instagram/status-schedule-rules"
+import {
+  DialogInlineToast,
+  FEEDBACK_COPY,
+  PendingButtonLabel,
+} from "@/components/dashboard/async-feedback"
 
 const selectClass = cn(
   "border-input bg-background dark:bg-input/30 h-7 w-full rounded-md border px-2 text-xs shadow-none outline-none",
@@ -39,55 +44,29 @@ const selectClass = cn(
 )
 
 type InstagramAddPostDialogProps = {
-  onAdded: () => void
+  onAdded: () => void | Promise<void>
+  /** 與 Instagram 頁相同資料源，供解析客戶名稱（不寫入 mock 帳號 id） */
+  workspaceContentItems: ContentItem[]
 }
 
-type ToastState = {
-  type: "success" | "error"
-  message: string
-} | null
+type ToastState = { message: string } | null
 
-function useDebouncedSetter<T>(
-  setter: React.Dispatch<React.SetStateAction<T>>,
-  delayMs = 300,
-) {
-  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  React.useEffect(() => {
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [])
-
-  return React.useCallback(
-    (value: T) => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-      timerRef.current = setTimeout(() => {
-        setter((prev) => (Object.is(prev, value) ? prev : value))
-      }, delayMs)
-    },
-    [delayMs, setter],
-  )
-}
-
-export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps) {
+export function InstagramAddPostDialog({
+  onAdded,
+  workspaceContentItems,
+}: InstagramAddPostDialogProps) {
   const { scope } = useWorkspaceScope()
   const [open, setOpen] = React.useState(false)
   const [localTitle, setLocalTitle] = React.useState("")
-  const [debouncedTitle, setDebouncedTitle] = React.useState("")
   const [localCaption, setLocalCaption] = React.useState("")
-  const [debouncedCaption, setDebouncedCaption] = React.useState("")
   const [postType, setPostType] = React.useState<ContentPostType>("feed")
   const [status, setStatus] = React.useState<"planning" | "scheduled" | "published">(
     "planning",
   )
   const [localScheduledAt, setLocalScheduledAt] = React.useState("")
-  const [isSubmitting, setIsSubmitting] = React.useState(false)
+  const [pending, setPending] = React.useState<false | "post" | "sync">(false)
   const [error, setError] = React.useState<string | null>(null)
   const [toast, setToast] = React.useState<ToastState>(null)
-
-  const debouncedSetTitle = useDebouncedSetter(setDebouncedTitle, 300)
-  const debouncedSetCaption = useDebouncedSetter(setDebouncedCaption, 300)
 
   React.useEffect(() => {
     if (!toast) return
@@ -95,22 +74,45 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
     return () => clearTimeout(timer)
   }, [toast])
 
+  /** 真實客戶 id（範圍選「客戶」）時，從 API 解析顯示名供 ensureClientExists／寫入 content_items */
+  const [scopeClientName, setScopeClientName] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    if (scope.mode !== "client") {
+      setScopeClientName(null)
+      return
+    }
+    let cancelled = false
+    fetch("/api/clients", { cache: "no-store" })
+      .then(async (res) => {
+        const json = (await res.json()) as {
+          clients?: { id: string; name: string }[]
+        }
+        if (!res.ok) return null
+        return json.clients?.find((c) => c.id === scope.clientId)?.name ?? null
+      })
+      .then((name) => {
+        if (!cancelled) setScopeClientName(name)
+      })
+      .catch(() => {
+        if (!cancelled) setScopeClientName(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [scope])
+
   const handleTitleChange = React.useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value
-      setLocalTitle(value)
-      debouncedSetTitle(value)
+      setLocalTitle(e.target.value)
     },
-    [debouncedSetTitle],
+    [],
   )
 
   const handleCaptionChange = React.useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const value = e.target.value
-      setLocalCaption(value)
-      debouncedSetCaption(value)
+      setLocalCaption(e.target.value)
     },
-    [debouncedSetCaption],
+    [],
   )
 
   const handleScheduledAtChange = React.useCallback(
@@ -133,24 +135,32 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
     [localScheduledAt],
   )
 
+  const busy = Boolean(pending)
   const canSubmit = React.useMemo(
-    () => Boolean(localTitle.trim()) && !isSubmitting && !validateStatusAndScheduledAt(status, localScheduledAt),
-    [isSubmitting, localScheduledAt, localTitle, status],
+    () => Boolean(localTitle.trim()) && !busy && !validateStatusAndScheduledAt(status, localScheduledAt),
+    [busy, localScheduledAt, localTitle, status],
   )
 
   const reset = React.useCallback(() => {
     setLocalTitle("")
-    setDebouncedTitle("")
     setLocalCaption("")
-    setDebouncedCaption("")
     setPostType("feed")
     setStatus("planning")
     setLocalScheduledAt("")
     setError(null)
   }, [])
 
+  const requestClose = React.useCallback(
+    (next: boolean) => {
+      if (!next && busy) return
+      setOpen(next)
+    },
+    [busy],
+  )
+
   const handleSubmit = React.useCallback(async (e: React.FormEvent) => {
     e.preventDefault()
+    if (busy) return
     const trimmedTitle = localTitle.trim()
     const trimmedCaption = localCaption.trim()
     if (!trimmedTitle) return
@@ -162,10 +172,17 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
 
     const plannedPublishDate = toPlannedPublishDateIso(localScheduledAt)
 
-    const acc = pickAccountForNewPost(scope, "instagram", mockSocialAccounts)
-    const mockClientRow = mockClients.find((c) => c.id === acc.clientId)
-    // Prefer display name so deriveClientId() can resolve by clients.name when DB id differs from mock ids.
-    const clientForApi = (mockClientRow?.name ?? acc.clientId).trim()
+    const resolved = resolveClientLabelForNewPost({
+      scope,
+      apiClientName: scopeClientName,
+      workspaceContentItems,
+      platform: "instagram",
+    })
+    if (!resolved.ok) {
+      setError(resolved.message)
+      return
+    }
+    const clientForApi = resolved.clientLabelForApi
     const createPayload = {
       title: trimmedTitle,
       caption: trimmedCaption,
@@ -176,8 +193,9 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
       client: clientForApi,
     }
 
-    setIsSubmitting(true)
+    setPending("post")
     setError(null)
+    setToast(null)
     try {
       const res = await fetch("/api/content/items", {
         method: "POST",
@@ -188,23 +206,31 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
       if (!res.ok) {
         const msg = json.error ?? "新增失敗。"
         setError(msg)
-        setToast({ type: "error", message: msg })
         return
       }
-      onAdded()
-      setToast({ type: "success", message: "已成功新增貼文。" })
-      // Keep dialog open briefly so success feedback is visible.
+      setPending("sync")
+      try {
+        await Promise.resolve(onAdded())
+      } catch (syncErr) {
+        const msg =
+          syncErr instanceof Error
+            ? syncErr.message
+            : "無法同步最新資料，請稍後再試。"
+        setError(msg)
+        return
+      }
+      setToast({ message: FEEDBACK_COPY.postAdded })
       await new Promise((resolve) => setTimeout(resolve, 700))
       reset()
       setOpen(false)
     } catch {
       const msg = "新增失敗，請稍後再試。"
       setError(msg)
-      setToast({ type: "error", message: msg })
     } finally {
-      setIsSubmitting(false)
+      setPending(false)
     }
   }, [
+    busy,
     localCaption,
     localScheduledAt,
     localTitle,
@@ -212,8 +238,20 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
     postType,
     reset,
     scope,
+    scopeClientName,
     status,
+    workspaceContentItems,
   ])
+
+  const primaryPendingLabel =
+    pending === "sync" ? FEEDBACK_COPY.addSyncing : pending === "post" ? FEEDBACK_COPY.addSubmitting : false
+
+  const validationHint = React.useMemo(() => {
+    if (busy) return null
+    if (!localTitle.trim()) return "請填寫標題後再加入。"
+    const ve = validateStatusAndScheduledAt(status, localScheduledAt)
+    return ve ?? null
+  }, [busy, localScheduledAt, localTitle, status])
 
   return (
     <>
@@ -226,21 +264,9 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
         <PlusIcon className="size-3.5" aria-hidden />
         新增貼文
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="gap-0 sm:max-w-md">
-          {toast ? (
-            <div
-              role="status"
-              className={cn(
-                "absolute right-4 top-4 z-50 rounded-md px-3 py-2 text-xs shadow-md",
-                toast.type === "success"
-                  ? "bg-emerald-600/95 text-white"
-                  : "bg-red-600/95 text-white",
-              )}
-            >
-              {toast.message}
-            </div>
-          ) : null}
+      <Dialog open={open} onOpenChange={requestClose}>
+        <DialogContent className="gap-0 sm:max-w-md" aria-busy={busy}>
+          {toast ? <DialogInlineToast type="success" message={toast.message} /> : null}
           <form onSubmit={handleSubmit}>
             <DialogHeader className="border-border/50 space-y-1 border-b pb-3 text-left">
               <DialogTitle>新增貼文</DialogTitle>
@@ -259,6 +285,7 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
                   onChange={handleTitleChange}
                   placeholder="貼文標題"
                   required
+                  disabled={busy}
                   className="h-8 text-sm"
                 />
               </div>
@@ -272,6 +299,7 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
                   onChange={handleCaptionChange}
                   placeholder="主要文案（可簡短）"
                   rows={2}
+                  disabled={busy}
                   className="min-h-[3.25rem] resize-y text-sm"
                 />
               </div>
@@ -284,6 +312,7 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
                     id="ig-d-post-type"
                     className={selectClass}
                     value={postType}
+                    disabled={busy}
                     onChange={(e) =>
                       setPostType(e.target.value as ContentPostType)
                     }
@@ -303,6 +332,7 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
                     id="ig-d-status"
                     className={selectClass}
                     value={status}
+                    disabled={busy}
                     onChange={handleStatusChange}
                   >
                     <option value="planning">planning</option>
@@ -320,7 +350,7 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
                   type="datetime-local"
                   value={localScheduledAt}
                   onChange={handleScheduledAtChange}
-                  disabled={status === "published"}
+                  disabled={busy || status === "published"}
                   className="h-8 text-sm"
                 />
                 {status === "published" ? (
@@ -330,18 +360,28 @@ export function InstagramAddPostDialog({ onAdded }: InstagramAddPostDialogProps)
                 ) : null}
               </div>
               {error ? <p className="text-destructive text-xs">{error}</p> : null}
+              {validationHint && !error ? (
+                <p className="text-muted-foreground text-[11px]">{validationHint}</p>
+              ) : null}
             </div>
             <DialogFooter className="border-border/50 bg-muted/20 gap-2 sm:justify-end">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setOpen(false)}
+                disabled={busy}
+                className="disabled:opacity-[0.78]"
+                onClick={() => requestClose(false)}
               >
                 取消
               </Button>
-              <Button type="submit" size="sm" disabled={!canSubmit}>
-                {isSubmitting ? "儲存中..." : "加入"}
+              <Button
+                type="submit"
+                size="sm"
+                disabled={!canSubmit}
+                className="gap-1.5 disabled:opacity-[0.78]"
+              >
+                <PendingButtonLabel idle="加入" pending={primaryPendingLabel} />
               </Button>
             </DialogFooter>
           </form>

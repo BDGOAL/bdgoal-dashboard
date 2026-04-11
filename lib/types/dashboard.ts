@@ -71,9 +71,19 @@ export type ContentItem = {
     url: string
   }>
   localNotes?: string | null
-  /** Agency scope — which client / brand / social account owns this asset */
+  /**
+   * 範圍篩選用 id（與 `clients.id` 對齊；來自匯入時 `ensureClientExists` 解析 Asana「Client」字串）。
+   * Asana 任務本身沒有獨立 client id 欄位，此為 Dashboard 解析後結果。
+   */
   clientId: string
+  /**
+   * 僅供 Dashboard UI 篩選（WorkspaceScope brand／account）。**非** Asana 欄位、也非 Asana 同步；
+   * 由 `content-repository` 依 `client_id` + platform 推導或示範對照，不得當作 Asana truth。
+   */
   brandId: string
+  /**
+   * 同上，Dashboard 內部維度／fallback，**非** Asana 社群帳號欄位。
+   */
   accountId: string
 }
 

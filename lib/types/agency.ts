@@ -20,7 +20,10 @@ export type SocialAccount = {
   brandId: string
 }
 
-/** Global workspace filter for agency multi-tenant UI */
+/**
+ * 頂端「範圍」篩選。`client` 可對應 DB 真實客戶。
+ * `brand`／`account` 為 Dashboard／示範用維度，**不是** Asana custom field，也不得宣稱來自 Asana 同步。
+ */
 export type WorkspaceScope =
   | { mode: "all" }
   | { mode: "client"; clientId: string }

@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr"
 
 const INTERNAL_PREFIXES = ["/", "/instagram", "/analytics", "/calendar", "/competitors", "/news", "/ready-queue"]
 const INTERNAL_API_PREFIXES = [
+  "/api/clients",
   "/api/content",
   "/api/asana/ready-queue",
   "/api/preview-links",

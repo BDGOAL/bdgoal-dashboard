@@ -5,22 +5,22 @@ import * as React from "react"
 import { Card } from "@/components/ui/card"
 import { EmptyState } from "@/components/dashboard/empty-state"
 import { PageIntro } from "@/components/dashboard/page-intro"
+import { PageSection } from "@/components/dashboard/page-section"
 import { useWorkspaceScope } from "@/components/dashboard/workspace-scope-context"
 import { contentStatusLabel } from "@/lib/instagram/labels"
-import { mockContentItems } from "@/lib/mock/content"
 import { filterContentByScope } from "@/lib/scope/filter-content"
-import type { ContentStatus } from "@/lib/types/dashboard"
+import type { ContentItem, ContentStatus } from "@/lib/types/dashboard"
 
 function countByStatus(items: { status: ContentStatus }[], status: ContentStatus) {
   return items.filter((i) => i.status === status).length
 }
 
-export function OverviewView() {
+export function OverviewView({ items: allItems }: { items: ContentItem[] }) {
   const { scope } = useWorkspaceScope()
 
   const items = React.useMemo(
-    () => filterContentByScope(mockContentItems, scope),
-    [scope],
+    () => filterContentByScope(allItems, scope),
+    [allItems, scope],
   )
 
   const stats = React.useMemo(() => {
@@ -55,8 +55,7 @@ export function OverviewView() {
         <StatCard label="已發佈" value={stats.published} hint="已上線" />
       </div>
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium">最近更新</h2>
+      <PageSection title="最近更新">
         {recent.length === 0 ? (
           <EmptyState
             title="此範圍內尚無內容"
@@ -68,7 +67,7 @@ export function OverviewView() {
             {recent.map((row) => (
               <li
                 key={row.id}
-                className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm"
+                className="hover:bg-muted/15 flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm transition-colors"
               >
                 <span className="font-medium">{row.title}</span>
                 <span className="text-muted-foreground flex gap-3 text-xs">
@@ -79,7 +78,7 @@ export function OverviewView() {
             ))}
           </ul>
         )}
-      </section>
+      </PageSection>
     </div>
   )
 }
@@ -94,7 +93,10 @@ function StatCard({
   hint: string
 }) {
   return (
-    <Card size="sm" className="ring-foreground/8 shadow-none">
+    <Card
+      size="sm"
+      className="ring-foreground/8 shadow-none transition-colors hover:bg-muted/15"
+    >
       <div className="px-4 py-3">
         <p className="text-muted-foreground text-xs">{label}</p>
         <p className="text-foreground mt-1 text-2xl font-semibold tabular-nums">

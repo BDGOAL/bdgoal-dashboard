@@ -1,3 +1,8 @@
+/**
+ * 依頂端 WorkspaceScope 篩選內容。
+ * `brand`／`account` 模式比對的是 `ContentItem.brandId`／`accountId`（Dashboard 內部／示範對照），
+ * **不是** Asana custom field；不得與 Asana 同步語意混談。
+ */
 import type { WorkspaceScope } from "@/lib/types/agency"
 import type { ContentItem } from "@/lib/types/dashboard"
 

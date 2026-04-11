@@ -5,6 +5,7 @@ import * as React from "react"
 import { type AsanaReadyItem } from "@/lib/integrations/asana-normalize"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Skeleton } from "@/components/ui/skeleton"
 import { EmptyState } from "@/components/dashboard/empty-state"
 
 type ReadyQueueResponse = {
@@ -124,7 +125,10 @@ export function AsanaReadyQueue() {
         </div>
 
         {loading ? (
-          <p className="text-muted-foreground text-sm">載入 Asana Ready Queue 中…</p>
+          <div className="space-y-2" aria-busy="true" aria-label="載入 Asana Ready Queue">
+            <Skeleton className="h-9 w-full max-w-md" />
+            <Skeleton className="h-32 w-full" />
+          </div>
         ) : null}
 
         {!loading && error ? (
@@ -150,8 +154,8 @@ export function AsanaReadyQueue() {
         {!loading && !error && items.length > 0 ? (
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full min-w-[980px] text-left text-xs">
-              <thead>
-                <tr className="bg-muted/30 border-b text-[11px]">
+              <thead className="sticky top-0 z-10">
+                <tr className="bg-muted/90 border-b text-[11px] backdrop-blur-sm">
                   <th className="px-3 py-2 font-medium">標題</th>
                   <th className="px-2 py-2 font-medium">客戶</th>
                   <th className="px-2 py-2 font-medium">平台</th>

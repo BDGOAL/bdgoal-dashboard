@@ -28,7 +28,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               <ScopeSelector />
             </div>
           </header>
-          <div className="flex flex-1 flex-col gap-6 p-6">{children}</div>
+          <div className="flex flex-1 flex-col gap-6 p-4 sm:p-6">{children}</div>
         </SidebarInset>
       </WorkspaceScopeProvider>
     </SidebarProvider>

@@ -22,13 +22,20 @@ import {
   validateStatusAndScheduledAt,
   type ContentWorkflowStatus,
 } from "@/components/instagram/status-schedule-rules"
+import {
+  DialogInlineToast,
+  FEEDBACK_COPY,
+  PendingButtonLabel,
+} from "@/components/dashboard/async-feedback"
 
 type Props = {
   item: ContentItem | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSaved: () => void
+  onSaved: () => void | Promise<void>
 }
+
+type ToastState = { message: string } | null
 
 export function ContentItemEditDialog({
   item,
@@ -39,8 +46,15 @@ export function ContentItemEditDialog({
   const [status, setStatus] = React.useState<ContentWorkflowStatus>("planning")
   const [plannedPublishDate, setPlannedPublishDate] = React.useState("")
   const [localNotes, setLocalNotes] = React.useState("")
-  const [saving, setSaving] = React.useState(false)
+  const [pending, setPending] = React.useState<false | "save" | "sync">(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [toast, setToast] = React.useState<ToastState>(null)
+
+  React.useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 2600)
+    return () => clearTimeout(timer)
+  }, [toast])
 
   React.useEffect(() => {
     if (!item) return
@@ -52,15 +66,23 @@ export function ContentItemEditDialog({
     )
     setLocalNotes(item.localNotes ?? "")
     setError(null)
+    setToast(null)
   }, [item])
 
+  function requestClose(next: boolean) {
+    if (!next && pending) return
+    onOpenChange(next)
+  }
+
   async function save() {
+    if (pending) return
     if (!item?.id.startsWith("cnt-")) {
       setError("Mock 項目不可編輯，請先使用 Asana 匯入或手動新增。")
       return
     }
-    setSaving(true)
+    setPending("save")
     setError(null)
+    setToast(null)
     try {
       const ruleError = validateStatusAndScheduledAt(status, plannedPublishDate)
       if (ruleError) {
@@ -81,21 +103,45 @@ export function ContentItemEditDialog({
       })
       const json = (await res.json()) as { error?: string }
       if (!res.ok) {
-        setError(json.error ?? "更新失敗。")
+        const msg = json.error ?? "更新失敗。"
+        setError(msg)
         return
       }
-      onSaved()
+      if (typeof window !== "undefined" && item) {
+        window.dispatchEvent(
+          new CustomEvent("bdgoal:content-item-updated", { detail: { id: item.id } }),
+        )
+      }
+      setPending("sync")
+      try {
+        await Promise.resolve(onSaved())
+      } catch (syncErr) {
+        const msg =
+          syncErr instanceof Error
+            ? syncErr.message
+            : "無法同步最新資料，請稍後再試。"
+        setError(msg)
+        return
+      }
+      setToast({ message: FEEDBACK_COPY.contentUpdated })
+      await new Promise((r) => setTimeout(r, 520))
       onOpenChange(false)
     } catch {
-      setError("更新失敗，請稍後再試。")
+      const msg = "更新失敗，請稍後再試。"
+      setError(msg)
     } finally {
-      setSaving(false)
+      setPending(false)
     }
   }
 
+  const busy = Boolean(pending)
+  const primaryPendingLabel =
+    pending === "sync" ? FEEDBACK_COPY.editSyncing : pending === "save" ? FEEDBACK_COPY.editSaving : false
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog open={open} onOpenChange={requestClose}>
+      <DialogContent className="sm:max-w-md" aria-busy={busy}>
+        {toast ? <DialogInlineToast type="success" message={toast.message} /> : null}
         <DialogHeader>
           <DialogTitle>編輯內容項目</DialogTitle>
           <DialogDescription className="text-xs">
@@ -118,6 +164,7 @@ export function ContentItemEditDialog({
                 id="edit-status"
                 className="border-input bg-background h-8 rounded-md border px-2 text-xs"
                 value={status}
+                disabled={busy}
                 onChange={(e) => {
                   const next = applyStatusChangeRule(
                     e.target.value as ContentWorkflowStatus,
@@ -141,13 +188,13 @@ export function ContentItemEditDialog({
                 id="edit-planned"
                 type="datetime-local"
                 value={plannedPublishDate}
+                disabled={busy || status === "published"}
                 onChange={(e) => {
                   const next = applyScheduledAtChangeRule(e.target.value, status)
                   setPlannedPublishDate(next.scheduledAt)
                   setStatus(next.status)
                   setError(null)
                 }}
-                disabled={status === "published"}
                 className="h-8 text-sm"
               />
               {status === "published" ? (
@@ -163,6 +210,7 @@ export function ContentItemEditDialog({
               <Textarea
                 id="edit-notes"
                 value={localNotes}
+                disabled={busy}
                 onChange={(e) => setLocalNotes(e.target.value)}
                 rows={3}
                 className="text-sm"
@@ -172,11 +220,24 @@ export function ContentItemEditDialog({
           </div>
         ) : null}
         <DialogFooter>
-          <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={busy}
+            className="disabled:opacity-[0.78]"
+            onClick={() => requestClose(false)}
+          >
             取消
           </Button>
-          <Button type="button" size="sm" disabled={saving || !item} onClick={() => void save()}>
-            {saving ? "儲存中..." : "儲存"}
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy || !item}
+            className="gap-1.5 disabled:opacity-[0.78]"
+            onClick={() => void save()}
+          >
+            <PendingButtonLabel idle="儲存" pending={primaryPendingLabel} />
           </Button>
         </DialogFooter>
       </DialogContent>
