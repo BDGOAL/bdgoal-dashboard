@@ -18,9 +18,7 @@ type ClientRow = { id: string; name: string }
 
 export function PreviewLinkManager() {
   const [clients, setClients] = React.useState<ClientRow[]>([])
-  const [clientSource, setClientSource] = React.useState<"api" | "mock_fallback" | "empty">(
-    "empty",
-  )
+  const [clientSource, setClientSource] = React.useState<"api" | "empty" | "error">("empty")
   const [clientId, setClientId] = React.useState("")
   const [monthKey, setMonthKey] = React.useState(new Date().toISOString().slice(0, 7))
   const [viewType, setViewType] = React.useState<"grid" | "calendar">("grid")
@@ -41,17 +39,10 @@ export function PreviewLinkManager() {
         if (cancelled) return
         if (!res.ok) {
           console.error("[PreviewLinkManager] GET /api/clients failed:", res.status, json.error)
-          const { mockClients } = await import("@/lib/mock/agency")
-          const fallback = mockClients.map((c) => ({ id: c.id, name: c.name }))
-          console.error(
-            "[PreviewLinkManager] Using mock agency clients as fallback (see lib/mock/agency).",
-          )
-          setClients(fallback)
-          setClientSource("mock_fallback")
-          setClientId(fallback[0]?.id ?? "")
-          setMsg(
-            "無法載入真實客戶列表，已改用示範用客戶 id（僅供離線／開發）；正式環境請確認登入與 API。",
-          )
+          setClients([])
+          setClientSource("error")
+          setClientId("")
+          setMsg("無法載入客戶列表（請確認已登入且 API 正常），無法建立預覽連結。")
           return
         }
         const list = json.clients ?? []
@@ -69,17 +60,10 @@ export function PreviewLinkManager() {
       } catch (e) {
         if (cancelled) return
         console.error("[PreviewLinkManager] GET /api/clients error:", e)
-        const { mockClients } = await import("@/lib/mock/agency")
-        const fallback = mockClients.map((c) => ({ id: c.id, name: c.name }))
-        console.error(
-          "[PreviewLinkManager] Using mock agency clients as fallback after network error.",
-        )
-        setClients(fallback)
-        setClientSource("mock_fallback")
-        setClientId(fallback[0]?.id ?? "")
-        setMsg(
-          "無法連線取得客戶列表，已改用示範資料；請檢查網路後重新整理。",
-        )
+        setClients([])
+        setClientSource("error")
+        setClientId("")
+        setMsg("無法連線取得客戶列表，請檢查網路後重新整理。")
       } finally {
         if (!cancelled) setClientsLoading(false)
       }
@@ -138,9 +122,9 @@ export function PreviewLinkManager() {
       {clientsLoading ? (
         <p className="text-muted-foreground mt-2 text-xs">載入客戶列表…</p>
       ) : null}
-      {clientSource === "mock_fallback" ? (
-        <p className="text-amber-600/90 dark:text-amber-400/90 mt-2 text-xs leading-snug">
-          示範用客戶 id：請勿與正式 DB 客戶混用；修復連線後重新整理改為真實列表。
+      {clientSource === "error" ? (
+        <p className="text-destructive mt-2 text-xs leading-snug">
+          客戶列表載入失敗，請確認登入狀態後重新整理。
         </p>
       ) : null}
       <div className="mt-2 flex flex-wrap gap-2">
@@ -156,7 +140,7 @@ export function PreviewLinkManager() {
           ) : (
             clients.map((c) => (
               <option key={c.id} value={c.id}>
-                {clientSource === "mock_fallback" ? `[示範] ${c.name}` : c.name}
+                {c.name}
               </option>
             ))
           )}

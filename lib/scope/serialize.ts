@@ -1,6 +1,6 @@
 /**
- * URL／select 用的 scope 字串。`brand:`／`account:` 對應的 id 屬 **Dashboard 內部篩選維度**（含 mock optgroup），
- * **不是** Asana 匯入欄位。語意總述見 `lib/asana-dashboard-field-semantics.ts`。
+ * URL／select 用的 scope 字串。`brand:`／`account:` 為歷史相容格式（頂端選單目前僅列出全部／真實客戶）。
+ * **不是** Asana 匯入欄位。語意見 `lib/asana-dashboard-field-semantics.ts`。
  */
 import type { WorkspaceScope } from "@/lib/types/agency"
 

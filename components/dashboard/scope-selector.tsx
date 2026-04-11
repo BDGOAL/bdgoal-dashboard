@@ -80,13 +80,11 @@ export function ScopeSelector() {
         aria-busy={loading}
       >
         <option value="all">全部客戶</option>
-        <optgroup label="客戶">
-          {clientOptions.map((c) => (
-            <option key={c.id} value={serializeScope({ mode: "client", clientId: c.id })}>
-              {c.name}
-            </option>
-          ))}
-        </optgroup>
+        {clientOptions.map((c) => (
+          <option key={c.id} value={serializeScope({ mode: "client", clientId: c.id })}>
+            {c.name}
+          </option>
+        ))}
       </select>
       {loadFailed ? (
         <span className="text-destructive sr-only">
