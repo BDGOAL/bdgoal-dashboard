@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
 import type { AsanaReadyItem } from "@/lib/integrations/asana-normalize"
 import type { ContentItem } from "@/lib/types/dashboard"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
@@ -57,9 +58,11 @@ function isUuid(value: string): boolean {
   )
 }
 
-async function deriveClientId(client: string) {
-  const supabase = await createSupabaseServerClient()
-  const trimmed = client.trim()
+/** Resolve existing clients.id by id / name / slug hint only (no insert). */
+async function lookupClientIdHint(
+  supabase: SupabaseClient,
+  trimmed: string,
+): Promise<string | null> {
   const { data: byId } = await supabase
     .from("clients")
     .select("id")
@@ -81,6 +84,80 @@ async function deriveClientId(client: string) {
     .eq("slug", slug)
     .maybeSingle()
   if (bySlug?.id) return bySlug.id
+
+  return null
+}
+
+function slugifyClientLabel(trimmed: string): string {
+  const base = trimmed
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+  return base.length ? base : `client-${crypto.randomUUID().slice(0, 8)}`
+}
+
+function isUniqueViolation(error: { code?: string } | null | undefined): boolean {
+  return error?.code === "23505"
+}
+
+async function insertNewClientByName(
+  supabase: SupabaseClient,
+  trimmed: string,
+): Promise<string> {
+  const baseSlug = slugifyClientLabel(trimmed)
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    const slug =
+      attempt === 0 ? baseSlug : `${baseSlug}-${crypto.randomUUID().slice(0, 8)}`
+    const id = crypto.randomUUID()
+
+    const { data, error } = await supabase
+      .from("clients")
+      .insert({
+        id,
+        name: trimmed,
+        slug,
+        status: "active",
+      })
+      .select("id")
+      .single()
+
+    if (!error && data?.id) return data.id
+    if (isUniqueViolation(error)) continue
+    throw new Error(
+      error
+        ? `無法建立客戶「${trimmed}」：${error.message}`
+        : `無法建立客戶「${trimmed}」。`,
+    )
+  }
+
+  throw new Error(`無法建立客戶「${trimmed}」：slug 衝突，請重試。`)
+}
+
+/**
+ * Webhook / service-role：使用呼叫端建立的 Supabase client（含 service role）解析或建立 clients 列。
+ * 不依賴瀏覽器 session，也不寫入 client_memberships（無「目前使用者」可授權）。
+ */
+export async function ensureClientRecordByNameForService(
+  supabase: SupabaseClient,
+  clientName: string,
+): Promise<string> {
+  const trimmed = clientName.trim()
+  if (!trimmed) {
+    throw new Error("客戶名稱不可為空白。")
+  }
+
+  const existingId = await lookupClientIdHint(supabase, trimmed)
+  if (existingId) return existingId
+
+  return insertNewClientByName(supabase, trimmed)
+}
+
+async function deriveClientId(client: string) {
+  const supabase = await createSupabaseServerClient()
+  const trimmed = client.trim()
+  const existingId = await lookupClientIdHint(supabase, trimmed)
+  if (existingId) return existingId
 
   throw new Error(
     `找不到對應客戶：「${trimmed}」。請確認 Supabase public.clients 已建立此客戶（id / name / slug 至少一項相符），且目前帳號在 client_memberships 有讀取該客戶；原型環境可參考 supabase/README 的 cl-aurora / cl-pulse 種子說明。`,
