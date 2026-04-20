@@ -67,6 +67,11 @@ export function InstagramGridView({
 
   function onDragEnd(event: DragEndEvent) {
     const { active, over } = event
+    // temporary instrumentation: verify dnd flow & computed ids
+    console.debug("[ig-grid] dragEnd", {
+      activeId: String(active.id),
+      overId: over ? String(over.id) : null,
+    })
     clearDragState()
     if (!over || active.id === over.id) return
     const activeCanDrag = Boolean(active.data.current?.canDrag)
@@ -74,7 +79,9 @@ export function InstagramGridView({
     const oldIndex = ids.indexOf(String(active.id))
     const newIndex = ids.indexOf(String(over.id))
     if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return
-    onWallOrderCommit?.(arrayMove(ids, oldIndex, newIndex))
+    const nextIds = arrayMove(ids, oldIndex, newIndex)
+    console.debug("[ig-grid] next order ids", nextIds)
+    onWallOrderCommit?.(nextIds)
   }
 
   if (items.length === 0) {

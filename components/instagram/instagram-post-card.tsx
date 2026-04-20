@@ -150,29 +150,28 @@ export function InstagramPostCard({
         aria-label={`開啟「${item.title}」詳情（${instagramDisplayStatusLabel[display]}）`}
       />
 
-      {draggable ? (
-        <button
-          type="button"
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          // dnd-kit: drag 僅由把手啟動，降低誤拖曳
-          {...(dragHandleAttributes ?? {})}
-          {...(dragHandleListeners ?? {})}
-          className={cn(
-            "absolute right-1 top-1 z-[8] hidden size-6 items-center justify-center rounded-md border",
-            "border-white/15 bg-black/40 text-white/78 backdrop-blur-[2px]",
-            "cursor-grab active:cursor-grabbing",
-            "opacity-0 transition-opacity duration-150 ease-out md:flex md:group-hover:opacity-100 md:focus-visible:opacity-100",
-            "max-md:flex max-md:opacity-100",
-            "hover:border-white/30 hover:text-white",
-            "focus-visible:ring-ring/70 outline-none focus-visible:ring-2",
-          )}
-          aria-label="拖曳排序"
-          title="拖曳排序"
-        >
-          <GripVertical className="size-3.5" aria-hidden />
-        </button>
-      ) : null}
+      <button
+        type="button"
+        disabled={!draggable}
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        // dnd-kit: drag 僅由把手啟動；不可拖曳卡片也保留同位置元素確保視覺一致。
+        {...(draggable ? (dragHandleAttributes ?? {}) : {})}
+        {...(draggable ? (dragHandleListeners ?? {}) : {})}
+        className={cn(
+          "absolute right-1 top-1 z-[10] hidden size-6 items-center justify-center rounded-md border",
+          "backdrop-blur-[2px] transition-all duration-150 ease-out md:flex",
+          draggable
+            ? "border-white/15 bg-black/40 text-white/78 cursor-grab active:cursor-grabbing opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 max-md:opacity-100 hover:border-white/30 hover:text-white"
+            : "pointer-events-none border-white/10 bg-black/20 text-white/35 opacity-35",
+          "focus-visible:ring-ring/70 outline-none focus-visible:ring-2",
+          "max-md:flex",
+        )}
+        aria-label={draggable ? "拖曳排序" : "此貼文不可拖曳"}
+        title={draggable ? "拖曳排序" : "已發佈貼文不可拖曳"}
+      >
+        <GripVertical className="size-3.5" aria-hidden />
+      </button>
     </div>
   )
 }

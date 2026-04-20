@@ -71,6 +71,14 @@ function reorderRowsByIds(rows: ContentItem[], orderedIds: string[]): ContentIte
   return orderedIds.map((id) => m.get(id)).filter(Boolean) as ContentItem[]
 }
 
+function applyInstagramOrderLocally(rows: ContentItem[], orderedIds: string[]): ContentItem[] {
+  const ordered = reorderRowsByIds(rows, orderedIds)
+  return ordered.map((row, index) => ({
+    ...row,
+    instagramOrder: index,
+  }))
+}
+
 type BgUploadState =
   | {
       kind: "working"
@@ -139,6 +147,7 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
   const [rows, setRows] = React.useState(filteredItems)
   const [reorderError, setReorderError] = React.useState<string | null>(null)
   const [bgUpload, setBgUpload] = React.useState<BgUploadState | null>(null)
+  const pendingOrderIdsRef = React.useRef<string[] | null>(null)
 
   React.useEffect(() => {
     setRows(filteredItems)
@@ -157,7 +166,15 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
             return
           }
           const raw = filterInstagramItemsForClient(all, scope.clientId)
-          setRows(sortInstagramWallItems(raw))
+          const sorted = sortInstagramWallItems(raw)
+          const pendingIds = pendingOrderIdsRef.current
+          if (pendingIds && pendingIds.length === sorted.length) {
+            const sortedIdSet = new Set(sorted.map((r) => r.id))
+            const allMatch = pendingIds.every((id) => sortedIdSet.has(id))
+            setRows(allMatch ? applyInstagramOrderLocally(sorted, pendingIds) : sorted)
+          } else {
+            setRows(sorted)
+          }
         } else {
           throw new Error(
             "\u7121\u6cd5\u8207\u4f3a\u670d\u5668\u540c\u6b65\u5217\u8868\uff0c\u8acb\u7a0d\u5f8c\u518d\u8a66\u3002",
@@ -183,10 +200,11 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
       return
     }
     setReorderError(null)
+    pendingOrderIdsRef.current = orderedIds
     let snapshot: ContentItem[] = []
     setRows((prev) => {
       snapshot = prev
-      return reorderRowsByIds(prev, orderedIds)
+      return applyInstagramOrderLocally(prev, orderedIds)
     })
     try {
       const res = await fetch("/api/content/items/reorder", {
@@ -198,7 +216,10 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
       if (!res.ok) {
         throw new Error(json.error ?? "排序更新失敗。")
       }
+      // API 成功後維持目前本地順序，直到下一次伺服器回傳同序資料覆蓋。
+      pendingOrderIdsRef.current = orderedIds
     } catch (e) {
+      pendingOrderIdsRef.current = null
       setRows(snapshot)
       const msg = e instanceof Error ? e.message : "排序更新失敗。"
       setReorderError(msg)
