@@ -1,124 +1,158 @@
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import type { ContentItem } from "@/lib/types/dashboard"
-import { getContentDisplayDate } from "@/lib/instagram/content-helpers"
-import {
-  contentPostTypeLabel,
-  contentStatusLabel,
-} from "@/lib/instagram/labels"
+"use client"
 
-function captionPreview(caption: string, max = 72) {
-  const t = caption.trim()
-  if (t.length <= max) return t
-  return `${t.slice(0, max)}…`
+import * as React from "react"
+import { GripVertical, ImageIcon } from "lucide-react"
+
+import type { ContentItem } from "@/lib/types/dashboard"
+import {
+  getInstagramDisplayStatus,
+  instagramDisplayStatusBadgeClass,
+  instagramDisplayStatusLabel,
+} from "@/lib/instagram/instagram-display-status"
+import { getInstagramPrimaryImageUrl } from "@/lib/instagram/instagram-media"
+import { cn } from "@/lib/utils"
+
+function formatScheduleCorner(value: string | null | undefined): string {
+  if (!value) return ""
+  try {
+    return new Intl.DateTimeFormat("zh-TW", {
+      month: "numeric",
+      day: "numeric",
+    }).format(new Date(value))
+  } catch {
+    return ""
+  }
+}
+
+function GridTileImage({ url }: { url: string | null }) {
+  const [broken, setBroken] = React.useState(false)
+  if (!url || broken) {
+    return (
+      <div
+        className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-muted"
+        aria-hidden
+      >
+        <ImageIcon className="size-8 text-muted-foreground/50" />
+      </div>
+    )
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={url}
+      alt=""
+      className="absolute inset-0 size-full object-cover"
+      loading="lazy"
+      onError={() => setBroken(true)}
+    />
+  )
 }
 
 export function InstagramPostCard({
   item,
-  onEdit,
+  scheduleLabel,
+  draggable,
+  onOpen,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  isDropTarget,
+  className,
 }: {
   item: ContentItem
-  onEdit?: (item: ContentItem) => void
+  /** Shown in corner when scheduled / has date */
+  scheduleLabel?: string | null
+  draggable?: boolean
+  onOpen: () => void
+  onDragStart?: (e: React.DragEvent) => void
+  onDragOver?: (e: React.DragEvent) => void
+  onDrop?: (e: React.DragEvent) => void
+  isDropTarget?: boolean
+  className?: string
 }) {
-  const dateLabel =
-    item.status === "scheduled"
-      ? "排程"
-      : item.status === "published"
-        ? "發佈"
-        : "更新"
+  const display = getInstagramDisplayStatus(item)
+  const thumb = getInstagramPrimaryImageUrl(item)
+  const corner =
+    scheduleLabel ??
+    (display === "scheduled" || item.plannedPublishDate || item.scheduledAt
+      ? formatScheduleCorner(item.plannedPublishDate ?? item.scheduledAt)
+      : "")
 
   return (
-    <article className="border-border/60 bg-background/40 hover:bg-muted/25 rounded-md border px-2 py-1.5 transition-colors">
-      <div className="flex gap-2">
-        <div className="bg-muted/80 relative size-10 shrink-0 overflow-hidden rounded border border-border/40">
-          {item.thumbnail ? (
-            // eslint-disable-next-line @next/next/no-img-element -- external mock URLs
-            <img
-              src={item.thumbnail}
-              alt=""
-              width={40}
-              height={40}
-              className="size-full object-cover"
-            />
-          ) : (
-            <div className="text-muted-foreground/80 flex size-full items-center justify-center text-[9px]">
-              —
-            </div>
+    <div
+      className={cn(
+        "group relative aspect-square w-full overflow-hidden rounded-md border border-border/50 bg-muted shadow-sm transition-[box-shadow,transform] duration-150",
+        isDropTarget && "ring-primary ring-2 ring-offset-2 ring-offset-background",
+        className,
+      )}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        onDragOver={(e) => {
+          e.preventDefault()
+          onDragOver?.(e)
+        }}
+        onDrop={(e) => {
+          e.preventDefault()
+          onDrop?.(e)
+        }}
+        className={cn(
+          "absolute inset-0 z-0 text-left outline-none",
+          "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        )}
+        aria-label={`${item.title}，${instagramDisplayStatusLabel[display]}`}
+      />
+
+      <GridTileImage url={thumb} />
+
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-80" />
+
+      <div className="pointer-events-none absolute left-1.5 top-1.5 z-[1] flex max-w-[calc(100%-2.5rem)] flex-col gap-1">
+        <span
+          className={cn(
+            "w-fit rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none backdrop-blur-sm",
+            instagramDisplayStatusBadgeClass(display),
           )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start gap-2">
-            <h4 className="text-foreground line-clamp-2 min-w-0 flex-1 text-[13px] leading-snug font-medium">
-              {item.title}
-            </h4>
-            <div className="flex shrink-0 items-center gap-1">
-              <Badge
-                variant="secondary"
-                className="px-1.5 py-0 text-[10px] font-medium"
-              >
-                {item.source === "asana"
-                  ? "Asana"
-                  : item.source === "manual"
-                    ? "Manual"
-                    : "Mock"}
-              </Badge>
-              <Badge
-                variant="outline"
-                className="text-muted-foreground border-border/60 px-1.5 py-0 text-[10px] font-normal"
-              >
-                {contentStatusLabel[item.status]}
-              </Badge>
-            </div>
-          </div>
-          <p className="text-muted-foreground/90 mt-0.5 line-clamp-1 text-[11px] leading-tight">
-            {captionPreview(item.caption) || "（無文案）"}
-          </p>
-          <div className="text-muted-foreground/70 mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px]">
-            {item.clientName ? <span>{item.clientName}</span> : null}
-            {item.clientName ? (
-              <span className="text-border" aria-hidden>
-                ·
-              </span>
-            ) : null}
-            <span>{contentPostTypeLabel[item.postType]}</span>
-            {item.position ? (
-              <>
-                <span className="text-border" aria-hidden>
-                  ·
-                </span>
-                <span>Position: {item.position}</span>
-              </>
-            ) : null}
-            <span className="text-border" aria-hidden>
-              ·
-            </span>
-            <span>
-              {dateLabel} {getContentDisplayDate(item)}
-            </span>
-          </div>
-          {item.tags.length > 0 ? (
-            <div className="text-muted-foreground/60 mt-1 flex flex-wrap gap-1">
-              {item.tags.map((tag) => (
-                <span key={tag} className="text-[10px]">
-                  #{tag}
-                </span>
-              ))}
-            </div>
-          ) : null}
-          {onEdit ? (
-            <div className="mt-1.5">
-              <Button
-                type="button"
-                size="xs"
-                variant="outline"
-                onClick={() => onEdit(item)}
-              >
-                編輯
-              </Button>
-            </div>
-          ) : null}
-        </div>
+        >
+          {instagramDisplayStatusLabel[display]}
+        </span>
       </div>
-    </article>
+
+      {corner ? (
+        <div className="pointer-events-none absolute bottom-1.5 right-1.5 z-[1] rounded bg-background/85 px-1 py-0.5 text-[10px] font-medium tabular-nums text-foreground shadow-sm backdrop-blur-sm">
+          {corner}
+        </div>
+      ) : null}
+
+      {draggable ? (
+        <span
+          draggable
+          onDragStart={(e) => {
+            e.stopPropagation()
+            onDragStart?.(e)
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            "absolute right-1 top-1 z-[2] cursor-grab rounded-md border border-white/20 bg-black/35 p-0.5 text-white/90 backdrop-blur-sm",
+            "active:cursor-grabbing",
+            "focus-visible:ring-ring outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
+          )}
+          aria-label="拖曳以重新排序"
+          title="拖曳排序"
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault()
+            }
+          }}
+        >
+          <GripVertical className="size-4" aria-hidden />
+        </span>
+      ) : null}
+    </div>
   )
 }

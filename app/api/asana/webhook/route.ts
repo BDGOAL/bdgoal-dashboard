@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import crypto from "crypto"
+
+import {
+  handleAsanaWebhookEvents,
+  verifyAsanaWebhookSignature,
+} from "@/lib/integrations/asana-webhook-handler"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -14,25 +18,6 @@ type AsanaWebhookPayload = {
     resource?: { gid?: string; resource_type?: string }
     parent?: { gid?: string; resource_type?: string }
   }>
-}
-
-function verifyAsanaSignature(opts: {
-  rawBody: string
-  signatureHeader: string
-  secret: string
-}) {
-  const { rawBody, signatureHeader, secret } = opts
-
-  const computed = crypto
-    .createHmac("sha256", secret)
-    .update(rawBody, "utf8")
-    .digest("hex")
-
-  const sigBuf = Buffer.from(signatureHeader, "utf8")
-  const compBuf = Buffer.from(computed, "utf8")
-
-  if (sigBuf.length !== compBuf.length) return false
-  return crypto.timingSafeEqual(sigBuf, compBuf)
 }
 
 export async function POST(req: NextRequest) {
@@ -50,7 +35,7 @@ export async function POST(req: NextRequest) {
       }
     }
     if (!parsed?.events?.length) {
-      console.info("[asana/webhook] handshake")
+      console.info("[asana/webhook] handshake accepted")
       return new NextResponse("", {
         status: 200,
         headers: { "x-hook-secret": hookSecret },
@@ -61,7 +46,7 @@ export async function POST(req: NextRequest) {
   // 2) Signature 驗證（所有正常 webhook event 都會有）
   const signature = req.headers.get("x-hook-signature")
   if (!signature) {
-    console.error("[asana/webhook] missing signature")
+    console.error("[asana/webhook] missing x-hook-signature")
     return new NextResponse("missing signature", { status: 400 })
   }
 
@@ -71,34 +56,43 @@ export async function POST(req: NextRequest) {
     return new NextResponse("webhook not configured", { status: 500 })
   }
 
-  const isValid = verifyAsanaSignature({
+  const isValid = verifyAsanaWebhookSignature({
     rawBody,
     signatureHeader: signature,
     secret,
   })
 
   if (!isValid) {
-    console.error("[asana/webhook] invalid signature")
+    console.error("[asana/webhook] signature verification failed")
     return new NextResponse("invalid signature", { status: 401 })
   }
 
-  // 3) 驗證通過，先處理 payload
+  // 3) 驗證通過，處理 payload（簽章以 rawBody 計算，須與此處 parse 來源一致）
   let body: AsanaWebhookPayload
   try {
-    body = rawBody ? (JSON.parse(rawBody) as AsanaWebhookPayload) : {}
+    body = rawBody.trim().length > 0 ? (JSON.parse(rawBody) as AsanaWebhookPayload) : {}
   } catch {
-    console.error("[asana/webhook] invalid json")
+    console.error("[asana/webhook] invalid json after verified signature")
     return new NextResponse("invalid payload", { status: 400 })
   }
-  console.log("[asana/webhook] raw body:", rawBody)
 
   const events = body.events ?? []
   if (events.length === 0) {
     return new NextResponse("ok", { status: 200 })
   }
 
-  console.log("[asana/webhook] verified events:", JSON.stringify(events))
+  console.info("[asana/webhook] verified; processing events", { count: events.length })
 
-  // 暫時只係 log，之後你可以改為呼叫 handleAsanaWebhookEvents(events)
+  try {
+    await handleAsanaWebhookEvents(events)
+    console.info("[asana/webhook] handler completed", { count: events.length })
+  } catch (error) {
+    console.error("[asana/webhook] handler failed", {
+      count: events.length,
+      message: error instanceof Error ? error.message : String(error),
+    })
+    return new NextResponse("handler error", { status: 500 })
+  }
+
   return new NextResponse("ok", { status: 200 })
 }

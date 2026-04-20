@@ -1,7 +1,8 @@
 import type { ContentItem, ContentStatus } from "@/lib/types/dashboard"
 import { EmptyState } from "@/components/dashboard/empty-state"
-import { InstagramPostCard } from "@/components/instagram/instagram-post-card"
 import { Badge } from "@/components/ui/badge"
+import { contentStatusLabel } from "@/lib/instagram/labels"
+import { cn } from "@/lib/utils"
 
 const EMPTY_BY_STATUS: Record<
   ContentStatus,
@@ -66,7 +67,20 @@ export function InstagramStatusColumn({
           />
         ) : (
           items.map((item) => (
-            <InstagramPostCard key={item.id} item={item} onEdit={onEdit} />
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onEdit?.(item)}
+              className={cn(
+                "border-border/50 bg-background/50 hover:bg-muted/50 rounded-md border px-2 py-1.5 text-left text-xs transition-colors",
+                "focus-visible:ring-ring outline-none focus-visible:ring-2",
+              )}
+            >
+              <span className="text-foreground line-clamp-2 font-medium">{item.title}</span>
+              <span className="text-muted-foreground mt-0.5 block text-[10px]">
+                {contentStatusLabel[item.status]}
+              </span>
+            </button>
           ))
         )}
       </div>

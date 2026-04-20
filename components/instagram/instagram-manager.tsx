@@ -5,23 +5,33 @@ import * as React from "react"
 import { ListSyncStatus } from "@/components/dashboard/async-feedback"
 import { InstagramAddPostDialog } from "@/components/instagram/instagram-add-post-dialog"
 import { ContentItemEditDialog } from "@/components/instagram/content-item-edit-dialog"
+import { InstagramCalendarView } from "@/components/instagram/instagram-calendar-view"
 import { InstagramGridView } from "@/components/instagram/instagram-grid-view"
-import { InstagramStatusColumn } from "@/components/instagram/instagram-status-column"
-import { InstagramSummaryRow } from "@/components/instagram/instagram-summary-row"
-import { ViewModeToggle } from "@/components/dashboard/view-mode-toggle"
+import { InstagramPostDetailsPanel } from "@/components/instagram/instagram-post-details-panel"
+import {
+  InstagramViewSwitcher,
+  type InstagramMainView,
+} from "@/components/instagram/instagram-view-switcher"
 import { useWorkspaceScope } from "@/components/dashboard/workspace-scope-context"
-import type { ContentItem, ContentStatus } from "@/lib/types/dashboard"
+import type { ContentItem } from "@/lib/types/dashboard"
 import { fetchDashboardContentItems } from "@/lib/dashboard/fetch-dashboard-content-items-client"
 import { filterContentByScope } from "@/lib/scope/filter-content"
-import { countByStatus, filterByPlatform, itemsWithStatus } from "@/lib/instagram/content-helpers"
+import { filterByPlatform } from "@/lib/instagram/content-helpers"
+import {
+  contentItemStatusToApi,
+  isInstagramPersistableItem,
+  persistInstagramPlannedDateChange,
+} from "@/lib/instagram/instagram-ui-persistence"
 import { cn } from "@/lib/utils"
 
 export function InstagramManager({ items }: { items: ContentItem[] }) {
   const { scope } = useWorkspaceScope()
-  const [view, setView] = React.useState<"workflow" | "grid">("workflow")
+  const [mainView, setMainView] = React.useState<InstagramMainView>("grid")
   const [loading, setLoading] = React.useState(false)
   const [editItem, setEditItem] = React.useState<ContentItem | null>(null)
   const [editOpen, setEditOpen] = React.useState(false)
+  const [detailsItem, setDetailsItem] = React.useState<ContentItem | null>(null)
+  const [detailsOpen, setDetailsOpen] = React.useState(false)
 
   const scoped = React.useMemo(() => {
     return filterContentByScope(filterByPlatform(items, "instagram"), scope)
@@ -59,118 +69,82 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
     return next
   }
 
-  const counts = React.useMemo(() => {
-    const c = {} as Record<ContentStatus, number>
-    const statuses: ContentStatus[] = [
-      "idea",
-      "draft",
-      "scheduled",
-      "published",
-    ]
-    for (const s of statuses) {
-      c[s] = countByStatus(rows, s)
-    }
-    return c
-  }, [rows])
+  function openDetails(item: ContentItem) {
+    setDetailsItem(item)
+    setDetailsOpen(true)
+  }
 
-  const { backlog, drafts, scheduled, published } = React.useMemo(() => {
-    return {
-      backlog: itemsWithStatus(rows, "idea"),
-      drafts: itemsWithStatus(rows, "draft"),
-      scheduled: itemsWithStatus(rows, "scheduled"),
-      published: itemsWithStatus(rows, "published"),
-    }
-  }, [rows])
+  function handleGridOrderChange(reorderedDraggableItems: ContentItem[]) {
+    setRows((prev) => {
+      const idSet = new Set(reorderedDraggableItems.map((i) => i.id))
+      return [...reorderedDraggableItems, ...prev.filter((i) => !idSet.has(i.id))]
+    })
+  }
+
+  function handleCalendarReschedule(prev: ContentItem, next: ContentItem) {
+    setRows((r) => r.map((i) => (i.id === next.id ? next : i)))
+    if (!isInstagramPersistableItem(prev)) return
+    void (async () => {
+      const apiStatus = contentItemStatusToApi(next.status)
+      const iso = next.plannedPublishDate ?? null
+      const result = await persistInstagramPlannedDateChange({
+        item: prev,
+        plannedPublishDateIso: iso,
+        apiStatus,
+      })
+      if (!result.ok) await refreshRows()
+    })()
+  }
 
   return (
     <div className="flex flex-col gap-3">
       {loading ? <ListSyncStatus /> : null}
-      <ViewModeToggle
-        aria-label={"Instagram \u6aa2\u8996\u6a21\u5f0f"}
-        value={view}
-        onValueChange={(v) => setView(v as "workflow" | "grid")}
-        options={[
-          { value: "workflow", label: "Workflow" },
-          { value: "grid", label: "Grid" },
-        ]}
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+        <InstagramViewSwitcher value={mainView} onValueChange={setMainView} />
+        <div className="flex items-center justify-end gap-2">
+          <InstagramAddPostDialog
+            onAdded={() => refreshRows()}
+            workspaceContentItems={items}
+          />
+        </div>
+      </div>
+
+      <div
+        className={cn(
+          "transition-opacity duration-200 ease-out",
+          loading && "pointer-events-none opacity-[0.72]",
+        )}
+        aria-busy={loading}
+      >
+        {mainView === "grid" ? (
+          <InstagramGridView
+            items={rows}
+            scope={scope}
+            onRequestDetails={openDetails}
+            onGridOrderChange={handleGridOrderChange}
+          />
+        ) : (
+          <InstagramCalendarView
+            items={rows}
+            scope={scope}
+            onRequestDetails={openDetails}
+            onRescheduleItem={handleCalendarReschedule}
+          />
+        )}
+      </div>
+
+      <InstagramPostDetailsPanel
+        item={detailsItem}
+        open={detailsOpen}
+        onOpenChange={setDetailsOpen}
+        onSaved={() => refreshRows()}
+        onRequestFullEdit={(item) => {
+          setEditItem(item)
+          setEditOpen(true)
+        }}
       />
 
-      {view === "grid" ? (
-        <div
-          className={cn(
-            "flex flex-col gap-3 transition-opacity duration-150",
-            loading && "pointer-events-none opacity-[0.72]",
-          )}
-          aria-busy={loading}
-        >
-        <InstagramGridView
-          items={rows}
-          scope={scope}
-          onRequestEdit={(item) => {
-            setEditItem(item)
-            setEditOpen(true)
-          }}
-        />
-        </div>
-      ) : (
-        <div
-          className={cn(
-            "flex flex-col gap-3 transition-opacity duration-150",
-            loading && "pointer-events-none opacity-[0.72]",
-          )}
-          aria-busy={loading}
-        >
-      <InstagramSummaryRow counts={counts} />
-      <div className="flex items-center justify-end gap-2">
-        <InstagramAddPostDialog
-          onAdded={() => refreshRows()}
-          workspaceContentItems={items}
-        />
-      </div>
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4 xl:items-start">
-        <InstagramStatusColumn
-          title="靈感／待辦"
-          status="idea"
-          count={backlog.length}
-          items={backlog}
-          onEdit={(item) => {
-            setEditItem(item)
-            setEditOpen(true)
-          }}
-        />
-        <InstagramStatusColumn
-          title="草稿"
-          status="draft"
-          count={drafts.length}
-          items={drafts}
-          onEdit={(item) => {
-            setEditItem(item)
-            setEditOpen(true)
-          }}
-        />
-        <InstagramStatusColumn
-          title="已排程"
-          status="scheduled"
-          count={scheduled.length}
-          items={scheduled}
-          onEdit={(item) => {
-            setEditItem(item)
-            setEditOpen(true)
-          }}
-        />
-        <InstagramStatusColumn
-          title="已發佈"
-          status="published"
-          count={published.length}
-          items={published}
-          onEdit={(item) => {
-            setEditItem(item)
-            setEditOpen(true)
-          }}
-        />
-      </div>
-        </div>
-      )}
       <ContentItemEditDialog
         item={editItem}
         open={editOpen}
