@@ -27,6 +27,8 @@ import {
   FEEDBACK_COPY,
   PendingButtonLabel,
 } from "@/components/dashboard/async-feedback"
+import { contentItemPlannedInputValue } from "@/lib/instagram/datetime-local"
+import { isInstagramPersistableItem } from "@/lib/instagram/instagram-ui-persistence"
 
 type Props = {
   item: ContentItem | null
@@ -59,11 +61,7 @@ export function ContentItemEditDialog({
   React.useEffect(() => {
     if (!item) return
     setStatus(item.status === "published" ? "published" : item.status === "scheduled" ? "scheduled" : "planning")
-    setPlannedPublishDate(
-      item.plannedPublishDate
-        ? new Date(item.plannedPublishDate).toISOString().slice(0, 16)
-        : "",
-    )
+    setPlannedPublishDate(contentItemPlannedInputValue(item))
     setLocalNotes(item.localNotes ?? "")
     setError(null)
     setToast(null)
@@ -76,8 +74,8 @@ export function ContentItemEditDialog({
 
   async function save() {
     if (pending) return
-    if (!item?.id.startsWith("cnt-")) {
-      setError("Mock 項目不可編輯，請先使用 Asana 匯入或手動新增。")
+    if (!item || !isInstagramPersistableItem(item)) {
+      setError("此項目無法由此儲存（示範資料或不受支援的 id）。")
       return
     }
     setPending("save")

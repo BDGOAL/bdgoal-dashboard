@@ -32,6 +32,13 @@ import {
 } from "@/lib/instagram/instagram-display-status"
 import { isInstagramClientScope } from "@/lib/instagram/instagram-scope"
 import { uploadContentItemAttachmentsSequential } from "@/lib/instagram/instagram-compose-upload"
+import {
+  compressImageForPlannerUpload,
+  PLANNER_UPLOAD_MAX_EDGE,
+  PLANNER_UPLOAD_MAX_FILES,
+  PLANNER_UPLOAD_MAX_OUTPUT_BYTES,
+  validatePlannerImageFileForQueue,
+} from "@/lib/instagram/instagram-image-upload-client"
 
 const selectClass = cn(
   "border-input bg-background dark:bg-input/30 h-9 w-full rounded-md border px-2 text-sm shadow-none outline-none",
@@ -58,6 +65,20 @@ type InstagramAddPostDialogProps = {
 type ToastState = { message: string } | null
 
 type MediaSlot = { file: File; previewUrl: string }
+
+async function buildCompressedFilesForSlots(slots: MediaSlot[]): Promise<File[]> {
+  return Promise.all(
+    slots.map(async (slot) => {
+      const f = await compressImageForPlannerUpload(slot.file)
+      if (f.size > PLANNER_UPLOAD_MAX_OUTPUT_BYTES) {
+        throw new Error(
+          `「${slot.file.name}」壓縮後仍約 ${(f.size / (1024 * 1024)).toFixed(1)}MB，請改用小圖或降低解析度。`,
+        )
+      }
+      return f
+    }),
+  )
+}
 
 function displayStatusToSubmit(
   display: InstagramDisplayStatus,
@@ -204,6 +225,22 @@ export function InstagramAddPostDialog({
       setError("請拖放或選擇圖片檔（image/*）。")
       return
     }
+    const room = PLANNER_UPLOAD_MAX_FILES - mediaSlots.length
+    if (files.length > room) {
+      setError(
+        room <= 0
+          ? `最多 ${PLANNER_UPLOAD_MAX_FILES} 張圖，請先移除部分圖片。`
+          : `最多 ${PLANNER_UPLOAD_MAX_FILES} 張，尚可再加入 ${room} 張。`,
+      )
+      return
+    }
+    for (const file of files) {
+      const v = validatePlannerImageFileForQueue(file)
+      if (v) {
+        setError(v)
+        return
+      }
+    }
     setError(null)
     setUploadFailedIndices(null)
     setMediaSlots((prev) => {
@@ -248,7 +285,15 @@ export function InstagramAddPostDialog({
       setError(null)
       setToast(null)
       try {
-        const files = mediaSlots.map((s) => s.file)
+        let files: File[]
+        try {
+          files = await buildCompressedFilesForSlots(mediaSlots)
+        } catch (prepErr) {
+          const msg =
+            prepErr instanceof Error ? prepErr.message : "圖片處理失敗，請稍後再試。"
+          setError(msg)
+          return
+        }
         const indices =
           uploadFailedIndices?.length && uploadFailedIndices.length < files.length
             ? uploadFailedIndices
@@ -360,7 +405,22 @@ export function InstagramAddPostDialog({
 
       if (mediaSlots.length > 0) {
         setPending("upload")
-        const files = mediaSlots.map((s) => s.file)
+        let files: File[]
+        try {
+          files = await buildCompressedFilesForSlots(mediaSlots)
+        } catch (prepErr) {
+          const msg =
+            prepErr instanceof Error ? prepErr.message : "圖片處理失敗，請稍後再試。"
+          setError(msg)
+          setRetryItemId(newId)
+          setPending("sync")
+          try {
+            await Promise.resolve(onAdded())
+          } catch {
+            /* ignore */
+          }
+          return
+        }
         const batch = await uploadContentItemAttachmentsSequential(newId, files)
         if (!batch.ok) {
           setRetryItemId(newId)
@@ -732,8 +792,9 @@ export function InstagramAddPostDialog({
 
               {error ? <p className="text-destructive text-xs">{error}</p> : null}
               <p className="text-muted-foreground text-[11px] leading-relaxed">
-                流程：先建立內容項目，再依序上傳多張圖片。若部分失敗，貼文仍會保留，可再按「儲存草稿」僅重試失敗的檔案。
-                「儲存草稿」／待審核可不填日期；有填則一併儲存為預計時間。「排程」按鈕須有時間；「發佈」為 published。
+                圖片僅供編排預覽；上傳前會在瀏覽器內縮放（長邊約 {PLANNER_UPLOAD_MAX_EDGE}px）並轉成
+                JPEG 壓縮，最多 {PLANNER_UPLOAD_MAX_FILES} 張，以符合主機單次請求上限、避免 413。流程：先建立內容項目，再依序上傳；失敗可再按「儲存草稿」重試。
+                「儲存草稿」／待審核可不填日期；「排程」須有時間；「發佈」為 published。
               </p>
             </div>
           </div>

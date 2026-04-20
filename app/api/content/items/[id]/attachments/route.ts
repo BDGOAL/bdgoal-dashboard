@@ -10,7 +10,8 @@ import {
 
 export const dynamic = "force-dynamic"
 
-const MAX_BYTES = 12 * 1024 * 1024
+/** 與許多邊緣主機請求上限對齊；更大檔請改走客戶端壓縮。 */
+const MAX_BYTES = 6 * 1024 * 1024
 const ALLOWED = new Set([
   "image/jpeg",
   "image/png",
@@ -151,7 +152,27 @@ export async function POST(req: Request, { params }: RouteParams) {
       }, "env")
     }
 
-    const formData = await req.formData()
+    let formData: FormData
+    try {
+      formData = await req.formData()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      const low = msg.toLowerCase()
+      const looks413 =
+        low.includes("413") ||
+        low.includes("too large") ||
+        low.includes("payload") ||
+        low.includes("body") ||
+        low.includes("limit")
+      console.error("[attachments] formData parse failed:", looks413 ? "likely_413" : "", msg)
+      return jsonError(413, {
+        error:
+          "上傳本文超過主機單次請求上限（常見為 413 / FUNCTION_PAYLOAD_TOO_LARGE）。請在客戶端縮小或壓縮圖片後再試。",
+        code: "FUNCTION_PAYLOAD_TOO_LARGE",
+        step: "parse_body",
+        detail: looks413 ? msg.slice(0, 200) : msg.slice(0, 120),
+      }, "payload")
+    }
     const file = formData.get("file")
     if (!(file instanceof File)) {
       return jsonError(400, {
@@ -163,7 +184,7 @@ export async function POST(req: Request, { params }: RouteParams) {
 
     if (file.size > MAX_BYTES) {
       return jsonError(413, {
-        error: "檔案過大（上限 12MB）。",
+        error: `單檔超過伺服器允許上限（${Math.round(MAX_BYTES / 1024 / 1024)}MB）。請先壓縮圖片。`,
         code: "PAYLOAD_TOO_LARGE",
         step: "validate_file",
       }, "validate")

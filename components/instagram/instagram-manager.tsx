@@ -121,8 +121,12 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
 
   function handleGridOrderChange(reorderedDraggableItems: ContentItem[]) {
     setRows((prev) => {
-      const idSet = new Set(reorderedDraggableItems.map((i) => i.id))
-      return [...reorderedDraggableItems, ...prev.filter((i) => !idSet.has(i.id))]
+      const dragIdSet = new Set(reorderedDraggableItems.map((i) => i.id))
+      const published = prev.filter((i) => i.status === "published")
+      const orphans = prev.filter(
+        (i) => i.status !== "published" && !dragIdSet.has(i.id),
+      )
+      return [...reorderedDraggableItems, ...orphans, ...published]
     })
   }
 

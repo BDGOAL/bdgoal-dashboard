@@ -81,26 +81,28 @@ export function InstagramPostCard({
   return (
     <div
       className={cn(
-        "group relative aspect-square w-full overflow-hidden rounded-md border border-border/50 bg-muted shadow-sm transition-[box-shadow,transform] duration-150",
-        isDropTarget && "ring-primary ring-2 ring-offset-2 ring-offset-background",
+        "group relative aspect-square w-full min-w-0 overflow-hidden rounded-sm border border-border/40 bg-muted shadow-sm transition-[box-shadow,transform] duration-150",
+        isDropTarget && "ring-primary ring-2 ring-offset-1 ring-offset-background",
         className,
       )}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
+        draggable={Boolean(draggable)}
+        onDragStart={draggable ? (e) => onDragStart?.(e) : undefined}
         onClick={onOpen}
-        onDragOver={(e) => {
-          e.preventDefault()
-          onDragOver?.(e)
-        }}
-        onDrop={(e) => {
-          e.preventDefault()
-          onDrop?.(e)
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            onOpen()
+          }
         }}
         className={cn(
-          "absolute inset-0 z-0 text-left outline-none",
+          "absolute inset-0 z-0 outline-none",
+          draggable ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
           "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         )}
         aria-label={`${item.title}，${instagramDisplayStatusLabel[display]}`}
@@ -110,10 +112,10 @@ export function InstagramPostCard({
 
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-80" />
 
-      <div className="pointer-events-none absolute left-1.5 top-1.5 z-[1] flex max-w-[calc(100%-2.5rem)] flex-col gap-1">
+      <div className="pointer-events-none absolute left-1 top-1 z-[1] flex max-w-[calc(100%-2rem)] flex-col gap-1">
         <span
           className={cn(
-            "w-fit rounded border px-1.5 py-0.5 text-[10px] font-medium leading-none backdrop-blur-sm",
+            "w-fit rounded border px-1 py-0.5 text-[9px] font-medium leading-none backdrop-blur-sm",
             instagramDisplayStatusBadgeClass(display),
           )}
         >
@@ -122,36 +124,18 @@ export function InstagramPostCard({
       </div>
 
       {corner ? (
-        <div className="pointer-events-none absolute bottom-1.5 right-1.5 z-[1] rounded bg-background/85 px-1 py-0.5 text-[10px] font-medium tabular-nums text-foreground shadow-sm backdrop-blur-sm">
+        <div className="pointer-events-none absolute bottom-1 right-1 z-[1] rounded bg-background/85 px-1 py-0.5 text-[9px] font-medium tabular-nums text-foreground shadow-sm backdrop-blur-sm">
           {corner}
         </div>
       ) : null}
 
       {draggable ? (
-        <span
-          draggable
-          onDragStart={(e) => {
-            e.stopPropagation()
-            onDragStart?.(e)
-          }}
-          onClick={(e) => e.stopPropagation()}
-          className={cn(
-            "absolute right-1 top-1 z-[2] cursor-grab rounded-md border border-white/20 bg-black/35 p-0.5 text-white/90 backdrop-blur-sm",
-            "active:cursor-grabbing",
-            "focus-visible:ring-ring outline-none focus-visible:ring-2 focus-visible:ring-offset-1",
-          )}
-          aria-label="拖曳以重新排序"
-          title="拖曳排序"
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault()
-            }
-          }}
+        <div
+          className="pointer-events-none absolute right-0.5 top-0.5 z-[2] rounded border border-white/20 bg-black/35 p-0.5 text-white/90 backdrop-blur-sm"
+          aria-hidden
         >
-          <GripVertical className="size-4" aria-hidden />
-        </span>
+          <GripVertical className="size-3.5" />
+        </div>
       ) : null}
     </div>
   )

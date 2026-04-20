@@ -27,6 +27,7 @@ import {
   getInstagramDisplayStatus,
   instagramDisplayStatusLabel,
 } from "@/lib/instagram/instagram-display-status"
+import { contentItemPlannedInputValue } from "@/lib/instagram/datetime-local"
 import { isInstagramPersistableItem } from "@/lib/instagram/instagram-ui-persistence"
 import {
   DialogInlineToast,
@@ -39,15 +40,6 @@ function contentItemToWorkflow(item: ContentItem): ContentWorkflowStatus {
   if (item.status === "published") return "published"
   if (item.status === "scheduled") return "scheduled"
   return "planning"
-}
-
-function formatDatetimeLocalValue(iso: string | null | undefined): string {
-  if (!iso) return ""
-  try {
-    return new Date(iso).toISOString().slice(0, 16)
-  } catch {
-    return ""
-  }
 }
 
 /** 圖庫順序與 `content_attachments.sort_order` 一致；無附件列時僅顯示 thumbnail（不可單張刪除）。 */
@@ -96,9 +88,7 @@ export function InstagramPostDetailsPanel({
   React.useEffect(() => {
     if (!item) return
     setWorkflow(contentItemToWorkflow(item))
-    setPlannedLocal(
-      formatDatetimeLocalValue(item.plannedPublishDate ?? item.scheduledAt),
-    )
+    setPlannedLocal(contentItemPlannedInputValue(item))
     setCaptionDraft(item.caption ?? "")
     setGalleryIndex(0)
     setError(null)
