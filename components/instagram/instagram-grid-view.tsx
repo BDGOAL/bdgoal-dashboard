@@ -43,6 +43,7 @@ export function InstagramGridView({
   clientDisplayName,
   onRequestDetails,
   onWallOrderCommit,
+  onBulkDelete,
 }: {
   /** 已由 {@link InstagramManager} 篩選並排序：單一客戶 + Instagram */
   items: ContentItem[]
@@ -50,10 +51,20 @@ export function InstagramGridView({
   onRequestDetails: (item: ContentItem) => void
   /** 拖放完成後回傳完整牆面 id 順序（含已發佈） */
   onWallOrderCommit?: (orderedIds: string[]) => void
+  onBulkDelete?: (ids: string[]) => void
 }) {
   const ids = React.useMemo(() => items.map((i) => i.id), [items])
+  const deletableIds = React.useMemo(
+    () =>
+      items
+        .filter((i) => i.source === "manual")
+        .map((i) => i.id),
+    [items],
+  )
   const [activeId, setActiveId] = React.useState<string | null>(null)
   const [overId, setOverId] = React.useState<string | null>(null)
+  const [selectionMode, setSelectionMode] = React.useState(false)
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(new Set())
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
@@ -66,12 +77,11 @@ export function InstagramGridView({
   }
 
   function onDragEnd(event: DragEndEvent) {
+    if (selectionMode) {
+      clearDragState()
+      return
+    }
     const { active, over } = event
-    // temporary instrumentation: verify dnd flow & computed ids
-    console.debug("[ig-grid] dragEnd", {
-      activeId: String(active.id),
-      overId: over ? String(over.id) : null,
-    })
     clearDragState()
     if (!over || active.id === over.id) return
     const activeCanDrag = Boolean(active.data.current?.canDrag)
@@ -80,9 +90,12 @@ export function InstagramGridView({
     const newIndex = ids.indexOf(String(over.id))
     if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return
     const nextIds = arrayMove(ids, oldIndex, newIndex)
-    console.debug("[ig-grid] next order ids", nextIds)
     onWallOrderCommit?.(nextIds)
   }
+
+  React.useEffect(() => {
+    setSelectedIds((prev) => new Set([...prev].filter((id) => ids.includes(id))))
+  }, [ids])
 
   if (items.length === 0) {
     return (
@@ -96,7 +109,7 @@ export function InstagramGridView({
   }
 
   function SortableCard({ item }: { item: ContentItem }) {
-    const canDrag = item.status !== "published"
+    const canDrag = !selectionMode && item.status !== "published"
     const sortable = useSortable({
       id: item.id,
       data: { canDrag },
@@ -109,6 +122,18 @@ export function InstagramGridView({
       <InstagramPostCard
         item={item}
         draggable={canDrag}
+        selectable={item.source === "manual"}
+        selectionMode={selectionMode}
+        selected={selectedIds.has(item.id)}
+        onToggleSelect={() => {
+          if (item.source !== "manual") return
+          setSelectedIds((prev) => {
+            const next = new Set(prev)
+            if (next.has(item.id)) next.delete(item.id)
+            else next.add(item.id)
+            return next
+          })
+        }}
         setNodeRef={sortable.setNodeRef}
         style={style}
         dragHandleAttributes={
@@ -121,7 +146,19 @@ export function InstagramGridView({
             ? (sortable.listeners as unknown as Record<string, unknown>)
             : undefined
         }
-        onOpen={() => onRequestDetails(item)}
+        onOpen={() => {
+          if (selectionMode) {
+            if (item.source !== "manual") return
+            setSelectedIds((prev) => {
+              const next = new Set(prev)
+              if (next.has(item.id)) next.delete(item.id)
+              else next.add(item.id)
+              return next
+            })
+            return
+          }
+          onRequestDetails(item)
+        }}
         isDropTarget={Boolean(overId === item.id && activeId !== item.id)}
         isDragSource={Boolean(activeId === item.id)}
       />
@@ -130,6 +167,57 @@ export function InstagramGridView({
 
   return (
     <div className="flex min-w-0 max-w-full flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-muted-foreground text-xs">
+          {selectionMode ? `${selectedIds.size} selected` : `${clientDisplayName} · Grid`}
+        </p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {selectionMode ? (
+            <>
+              <button
+                type="button"
+                className="border-input bg-background hover:bg-accent h-7 rounded-md border px-2 text-xs"
+                onClick={() => setSelectedIds(new Set(deletableIds))}
+              >
+                Select all visible
+              </button>
+              <button
+                type="button"
+                className="border-input bg-background hover:bg-accent h-7 rounded-md border px-2 text-xs"
+                onClick={() => {
+                  setSelectionMode(false)
+                  setSelectedIds(new Set())
+                }}
+              >
+                Cancel selection
+              </button>
+              <button
+                type="button"
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90 h-7 rounded-md px-2 text-xs disabled:opacity-50"
+                disabled={selectedIds.size === 0}
+                onClick={() => {
+                  const idsToDelete = [...selectedIds]
+                  if (!idsToDelete.length) return
+                  if (!window.confirm(`確定刪除 ${idsToDelete.length} 則貼文？此動作無法復原。`)) return
+                  onBulkDelete?.(idsToDelete)
+                  setSelectedIds(new Set())
+                  setSelectionMode(false)
+                }}
+              >
+                Delete selected
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="border-input bg-background hover:bg-accent h-7 rounded-md border px-2 text-xs"
+              onClick={() => setSelectionMode(true)}
+            >
+              Select
+            </button>
+          )}
+        </div>
+      </div>
       <div className="mx-auto w-full max-w-[520px]">
         <DndContext
           sensors={sensors}

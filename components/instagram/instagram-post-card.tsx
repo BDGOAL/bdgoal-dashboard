@@ -55,6 +55,10 @@ export function InstagramPostCard({
   item,
   scheduleLabel,
   draggable,
+  selectable = false,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
   setNodeRef,
   style,
   dragHandleAttributes,
@@ -68,6 +72,10 @@ export function InstagramPostCard({
   /** Shown in corner when scheduled / has date */
   scheduleLabel?: string | null
   draggable?: boolean
+  selectable?: boolean
+  selectionMode?: boolean
+  selected?: boolean
+  onToggleSelect?: () => void
   setNodeRef?: (element: HTMLElement | null) => void
   style?: React.CSSProperties
   dragHandleAttributes?: Record<string, unknown>
@@ -96,6 +104,8 @@ export function InstagramPostCard({
         WALL_ASPECT,
         "bg-[#0a0a0a] ring-1 ring-white/5 transition-all duration-160 ease-out",
         "hover:-translate-y-[1px] hover:scale-[1.012] hover:shadow-[0_12px_28px_rgba(0,0,0,0.28)] hover:ring-white/15",
+        selectionMode && selectable && "cursor-pointer",
+        selected && "ring-primary/80 ring-2",
         isDropTarget && "ring-primary/90 z-[2] ring-2 ring-inset",
         isDragSource && "z-[3] scale-[0.985] opacity-[0.5] shadow-[0_16px_36px_rgba(0,0,0,0.32)]",
         className,
@@ -138,6 +148,28 @@ export function InstagramPostCard({
         </div>
       ) : null}
 
+      {selectionMode ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onToggleSelect?.()
+          }}
+          disabled={!selectable}
+          className={cn(
+            "absolute left-1 top-1 z-[10] inline-flex size-5 items-center justify-center rounded-sm border text-[10px]",
+            selectable
+              ? selected
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-white/40 bg-black/45 text-white"
+              : "border-white/20 bg-black/20 text-white/40",
+          )}
+          aria-label={selected ? "取消選取" : "選取貼文"}
+        >
+          {selected ? "✓" : ""}
+        </button>
+      ) : null}
+
       {/* 主要點擊區：不可 draggable，避免與 HTML5 drag 搶奪點擊導致無法開詳情 */}
       <button
         type="button"
@@ -159,13 +191,12 @@ export function InstagramPostCard({
         {...(draggable ? (dragHandleAttributes ?? {}) : {})}
         {...(draggable ? (dragHandleListeners ?? {}) : {})}
         className={cn(
-          "absolute right-1 top-1 z-[10] hidden size-6 items-center justify-center rounded-md border",
+          "absolute right-1 top-1 z-[12] hidden size-6 items-center justify-center rounded-md border",
           "backdrop-blur-[2px] transition-all duration-150 ease-out md:flex",
           draggable
-            ? "border-white/15 bg-black/40 text-white/78 cursor-grab active:cursor-grabbing opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 max-md:opacity-100 hover:border-white/30 hover:text-white"
-            : "pointer-events-none border-white/10 bg-black/20 text-white/35 opacity-35",
+            ? "border-white/15 bg-black/40 text-white/78 cursor-grab active:cursor-grabbing opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 [@media(hover:none)]:opacity-100 hover:border-white/30 hover:text-white"
+            : "pointer-events-none border-white/10 bg-black/20 text-white/35 opacity-0 [@media(hover:none)]:opacity-0",
           "focus-visible:ring-ring/70 outline-none focus-visible:ring-2",
-          "max-md:flex",
         )}
         aria-label={draggable ? "拖曳排序" : "此貼文不可拖曳"}
         title={draggable ? "拖曳排序" : "已發佈貼文不可拖曳"}
