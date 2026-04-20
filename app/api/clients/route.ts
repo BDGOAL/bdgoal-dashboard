@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { createSupabaseServerClient } from "@/lib/supabase/server"
+import { createSupabaseServiceRoleClient } from "@/lib/supabase/service-role"
 import { getPermissionContext } from "@/lib/auth/roles"
 
 export const dynamic = "force-dynamic"
@@ -49,8 +50,8 @@ export async function GET() {
 }
 
 /**
- * 建立新客戶（admin／editor，與 RLS `clients_insert_by_editor_or_admin` 一致），
- * 並為目前使用者建立第一筆 client_memberships（admin）。
+ * 建立新客戶：先以 {@link getPermissionContext} 驗證 admin／editor，
+ * 再以 **service role** 寫入（繞過 RLS，避免 `current_app_role()`／政策與 session 不一致導致失敗）。
  */
 export async function POST(req: Request) {
   try {
@@ -62,6 +63,21 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: "僅管理員或編輯可建立新客戶。" },
         { status: 403 },
+      )
+    }
+
+    let admin: ReturnType<typeof createSupabaseServiceRoleClient>
+    try {
+      admin = createSupabaseServiceRoleClient()
+    } catch (envErr) {
+      const msg = envErr instanceof Error ? envErr.message : String(envErr)
+      console.error("[api/clients POST] service client:", msg)
+      return NextResponse.json(
+        {
+          error:
+            "伺服器未正確設定 SUPABASE_SERVICE_ROLE_KEY，無法建立客戶。請聯絡管理員。",
+        },
+        { status: 503 },
       )
     }
 
@@ -82,10 +98,9 @@ export async function POST(req: Request) {
 
     void body.notes
 
-    const supabase = await createSupabaseServerClient()
     const id = crypto.randomUUID()
 
-    const { error: insClient } = await supabase.from("clients").insert({
+    const { error: insClient } = await admin.from("clients").insert({
       id,
       name,
       slug,
@@ -105,7 +120,7 @@ export async function POST(req: Request) {
       )
     }
 
-    const { error: insMem } = await supabase.from("client_memberships").insert({
+    const { error: insMem } = await admin.from("client_memberships").insert({
       user_id: ctx.userId,
       client_id: id,
       role: "admin",
@@ -113,9 +128,19 @@ export async function POST(req: Request) {
 
     if (insMem) {
       console.error("[api/clients POST] membership:", insMem.message)
+      const { error: delErr } = await admin.from("clients").delete().eq("id", id)
+      if (delErr) {
+        console.error("[api/clients POST] rollback client delete:", delErr.message)
+        return NextResponse.json(
+          {
+            error: `無法建立你的成員資格，且無法自動還原客戶列（id: ${id}）。請聯絡管理員處理：${insMem.message}`,
+          },
+          { status: 500 },
+        )
+      }
       return NextResponse.json(
         {
-          error: `客戶已建立，但無法加入你的成員資格：${insMem.message}。請由管理員手動加入 client_memberships。`,
+          error: `無法將你加入此客戶：${insMem.message}。已取消建立，請稍後再試或聯絡管理員。`,
         },
         { status: 500 },
       )
