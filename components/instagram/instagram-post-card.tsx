@@ -55,10 +55,11 @@ export function InstagramPostCard({
   item,
   scheduleLabel,
   draggable,
+  setNodeRef,
+  style,
+  dragHandleAttributes,
+  dragHandleListeners,
   onOpen,
-  onDragStart,
-  onDragOver,
-  onDrop,
   isDropTarget,
   isDragSource,
   className,
@@ -67,10 +68,11 @@ export function InstagramPostCard({
   /** Shown in corner when scheduled / has date */
   scheduleLabel?: string | null
   draggable?: boolean
+  setNodeRef?: (element: HTMLElement | null) => void
+  style?: React.CSSProperties
+  dragHandleAttributes?: Record<string, unknown>
+  dragHandleListeners?: Record<string, unknown>
   onOpen: () => void
-  onDragStart?: (e: React.DragEvent) => void
-  onDragOver?: (e: React.DragEvent) => void
-  onDrop?: (e: React.DragEvent) => void
   isDropTarget?: boolean
   /** 拖曳中：來源格視覺變淡 */
   isDragSource?: boolean
@@ -87,6 +89,8 @@ export function InstagramPostCard({
 
   return (
     <div
+      ref={setNodeRef}
+      style={style}
       className={cn(
         "group relative w-full min-w-0 overflow-hidden",
         WALL_ASPECT,
@@ -96,8 +100,6 @@ export function InstagramPostCard({
         isDragSource && "z-[3] scale-[0.985] opacity-[0.5] shadow-[0_16px_36px_rgba(0,0,0,0.32)]",
         className,
       )}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
     >
       <GridTileImage url={thumb} />
 
@@ -151,13 +153,11 @@ export function InstagramPostCard({
       {draggable ? (
         <button
           type="button"
-          draggable
-          onDragStart={(e) => {
-            e.stopPropagation()
-            onDragStart?.(e)
-          }}
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
+          // dnd-kit: drag 僅由把手啟動，降低誤拖曳
+          {...(dragHandleAttributes ?? {})}
+          {...(dragHandleListeners ?? {})}
           className={cn(
             "absolute right-1 top-1 z-[8] hidden size-6 items-center justify-center rounded-md border",
             "border-white/15 bg-black/40 text-white/78 backdrop-blur-[2px]",

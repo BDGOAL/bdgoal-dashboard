@@ -1,6 +1,21 @@
 "use client"
 
 import * as React from "react"
+import {
+  closestCenter,
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core"
+import {
+  arrayMove,
+  SortableContext,
+  rectSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable"
+import { CSS } from "@dnd-kit/utilities"
 import { ImageIcon } from "lucide-react"
 
 import { InstagramPostCard } from "@/components/instagram/instagram-post-card"
@@ -13,18 +28,6 @@ export function getGridImageUrl(item: ContentItem): string | null {
   const fromAttachment = item.attachments?.[0]?.url?.trim()
   if (fromAttachment) return fromAttachment
   return item.thumbnail?.trim() || null
-}
-
-/** 將 `src` 移至 `target` 所在索引（HTML5 拖放對齊牆面順序） */
-export function moveIdInList(ids: string[], src: string, target: string): string[] {
-  const from = ids.indexOf(src)
-  const to = ids.indexOf(target)
-  if (from < 0 || to < 0 || from === to) return ids
-  const next = [...ids]
-  next.splice(from, 1)
-  const adjustedTo = from < to ? to - 1 : to
-  next.splice(adjustedTo, 0, src)
-  return next
 }
 
 /**
@@ -48,72 +51,30 @@ export function InstagramGridView({
   /** 拖放完成後回傳完整牆面 id 順序（含已發佈） */
   onWallOrderCommit?: (orderedIds: string[]) => void
 }) {
-  const byId = React.useMemo(() => {
-    const m = new Map<string, ContentItem>()
-    for (const i of items) m.set(i.id, i)
-    return m
-  }, [items])
-
-  const baseIds = React.useMemo(() => items.map((i) => i.id), [items])
-
-  const [dragSourceId, setDragSourceId] = React.useState<string | null>(null)
-  const [dropTargetId, setDropTargetId] = React.useState<string | null>(null)
-
-  const previewIds = React.useMemo(() => {
-    if (!dragSourceId || !dropTargetId || dragSourceId === dropTargetId) {
-      return baseIds
-    }
-    return moveIdInList(baseIds, dragSourceId, dropTargetId)
-  }, [baseIds, dragSourceId, dropTargetId])
-
-  const displayItems = React.useMemo(() => {
-    return previewIds.map((id) => byId.get(id)).filter(Boolean) as ContentItem[]
-  }, [previewIds, byId])
-
-  function commitReorder(nextIds: string[]) {
-    onWallOrderCommit?.(nextIds)
-  }
-
-  function onDragStartFrom(id: string) {
-    return (e: React.DragEvent) => {
-      const item = byId.get(id)
-      if (!item || item.status === "published") return
-      e.dataTransfer.setData("application/ig-grid-id", id)
-      e.dataTransfer.effectAllowed = "move"
-      setDragSourceId(id)
-    }
-  }
-
-  function onDragOverTile(id: string) {
-    return (e: React.DragEvent) => {
-      if (!dragSourceId || dragSourceId === id) return
-      if (!baseIds.includes(id)) return
-      const srcItem = byId.get(dragSourceId)
-      if (!srcItem || srcItem.status === "published") return
-      e.preventDefault()
-      e.dataTransfer.dropEffect = "move"
-      setDropTargetId(id)
-    }
-  }
-
-  function onDropOnTile(targetId: string) {
-    return (e: React.DragEvent) => {
-      e.preventDefault()
-      const src = e.dataTransfer.getData("application/ig-grid-id") || dragSourceId
-      setDragSourceId(null)
-      setDropTargetId(null)
-      if (!src || src === targetId) return
-      const srcItem = byId.get(src)
-      if (!srcItem || srcItem.status === "published") return
-      if (!baseIds.includes(targetId)) return
-      const next = moveIdInList(baseIds, src, targetId)
-      commitReorder(next)
-    }
-  }
+  const ids = React.useMemo(() => items.map((i) => i.id), [items])
+  const [activeId, setActiveId] = React.useState<string | null>(null)
+  const [overId, setOverId] = React.useState<string | null>(null)
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+  )
 
   function clearDragState() {
-    setDragSourceId(null)
-    setDropTargetId(null)
+    setActiveId(null)
+    setOverId(null)
+  }
+
+  function onDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    clearDragState()
+    if (!over || active.id === over.id) return
+    const activeCanDrag = Boolean(active.data.current?.canDrag)
+    if (!activeCanDrag) return
+    const oldIndex = ids.indexOf(String(active.id))
+    const newIndex = ids.indexOf(String(over.id))
+    if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) return
+    onWallOrderCommit?.(arrayMove(ids, oldIndex, newIndex))
   }
 
   if (items.length === 0) {
@@ -127,32 +88,62 @@ export function InstagramGridView({
     )
   }
 
-  function renderCard(item: ContentItem) {
-    const isPublished = item.status === "published"
-    const canDrag = !isPublished
+  function SortableCard({ item }: { item: ContentItem }) {
+    const canDrag = item.status !== "published"
+    const sortable = useSortable({
+      id: item.id,
+      data: { canDrag },
+    })
+    const style = {
+      transform: CSS.Transform.toString(sortable.transform),
+      transition: sortable.transition,
+    } satisfies React.CSSProperties
     return (
       <InstagramPostCard
-        key={item.id}
         item={item}
         draggable={canDrag}
-        onOpen={() => onRequestDetails(item)}
-        onDragStart={canDrag ? onDragStartFrom(item.id) : undefined}
-        onDragOver={onDragOverTile(item.id)}
-        onDrop={onDropOnTile(item.id)}
-        isDropTarget={
-          dropTargetId === item.id &&
-          dragSourceId != null &&
-          dragSourceId !== item.id
+        setNodeRef={sortable.setNodeRef}
+        style={style}
+        dragHandleAttributes={
+          canDrag
+            ? (sortable.attributes as unknown as Record<string, unknown>)
+            : undefined
         }
-        isDragSource={Boolean(canDrag && dragSourceId === item.id)}
+        dragHandleListeners={
+          canDrag
+            ? (sortable.listeners as unknown as Record<string, unknown>)
+            : undefined
+        }
+        onOpen={() => onRequestDetails(item)}
+        isDropTarget={Boolean(overId === item.id && activeId !== item.id)}
+        isDragSource={Boolean(activeId === item.id)}
       />
     )
   }
 
   return (
-    <div className="flex min-w-0 max-w-full flex-col gap-2" onDragEnd={clearDragState}>
+    <div className="flex min-w-0 max-w-full flex-col gap-2">
       <div className="mx-auto w-full max-w-[520px]">
-        <div className={wallGridClass}>{displayItems.map((item) => renderCard(item))}</div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={(event) => {
+            setActiveId(String(event.active.id))
+          }}
+          onDragOver={(event) => {
+            setOverId(event.over ? String(event.over.id) : null)
+          }}
+          onDragCancel={clearDragState}
+          onDragEnd={onDragEnd}
+        >
+          <SortableContext items={ids} strategy={rectSortingStrategy}>
+            <div className={wallGridClass}>
+              {items.map((item) => (
+                <SortableCard key={item.id} item={item} />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </div>
     </div>
   )

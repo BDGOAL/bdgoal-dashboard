@@ -183,8 +183,11 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
       return
     }
     setReorderError(null)
-    const snapshot = [...rows]
-    setRows(reorderRowsByIds(rows, orderedIds))
+    let snapshot: ContentItem[] = []
+    setRows((prev) => {
+      snapshot = prev
+      return reorderRowsByIds(prev, orderedIds)
+    })
     try {
       const res = await fetch("/api/content/items/reorder", {
         method: "POST",
