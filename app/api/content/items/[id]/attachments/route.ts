@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { canEditClient, getPermissionContext } from "@/lib/auth/roles"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
+import { createSupabaseServiceRoleClient } from "@/lib/supabase/service-role"
 import {
   CONTENT_MEDIA_BUCKET,
   CONTENT_MEDIA_ITEMS_PREFIX,
@@ -18,6 +19,24 @@ const ALLOWED = new Set([
   "image/svg+xml",
 ])
 
+type ErrorBody = {
+  error: string
+  code: string
+  step: string
+  /** Supabase or platform message when safe to expose */
+  detail?: string
+}
+
+function jsonError(
+  status: number,
+  body: ErrorBody,
+  logPrefix: string,
+  logExtra?: string,
+) {
+  console.error(`[attachments] ${logPrefix}`, body.step, body.code, logExtra ?? body.detail ?? "")
+  return NextResponse.json(body, { status })
+}
+
 function extFromName(name: string, mime: string): string {
   const fromName = name.includes(".") ? name.split(".").pop()!.toLowerCase() : ""
   if (fromName && /^[a-z0-9]{1,8}$/.test(fromName)) return fromName
@@ -29,58 +48,135 @@ function extFromName(name: string, mime: string): string {
   return "bin"
 }
 
+/** Infer image/* when browser sends empty `file.type` (common with some drag sources). */
+function normalizeImageMime(file: File): string {
+  const t = (file.type || "").trim().toLowerCase()
+  if (t && t !== "application/octet-stream") return t
+  const n = file.name.toLowerCase()
+  if (n.endsWith(".jpg") || n.endsWith(".jpeg")) return "image/jpeg"
+  if (n.endsWith(".png")) return "image/png"
+  if (n.endsWith(".webp")) return "image/webp"
+  if (n.endsWith(".gif")) return "image/gif"
+  if (n.endsWith(".svg")) return "image/svg+xml"
+  return t || "application/octet-stream"
+}
+
+function mapStorageErrorMessage(raw: string): { code: string; hint: string } {
+  const m = raw.toLowerCase()
+  if (m.includes("bucket not found") || m.includes("not found")) {
+    return {
+      code: "BUCKET_MISSING",
+      hint: `Storage 找不到 bucket「${CONTENT_MEDIA_BUCKET}」。請在 Supabase 建立同名 bucket 或設定 NEXT_PUBLIC_SUPABASE_CONTENT_MEDIA_BUCKET。`,
+    }
+  }
+  if (m.includes("new row violates row-level security") || m.includes("rls") || m.includes("policy")) {
+    return {
+      code: "STORAGE_RLS",
+      hint: "Storage 權限被拒（RLS／policy）。若上傳改由 service role 仍失敗，請檢查 bucket 是否存在與專案設定。",
+    }
+  }
+  if (m.includes("jwt") || m.includes("unauthorized") || m.includes("permission denied")) {
+    return {
+      code: "STORAGE_AUTH",
+      hint: "Storage 回報未授權。請檢查 storage.objects 的 insert 政策與金鑰設定。",
+    }
+  }
+  return { code: "STORAGE_UPLOAD", hint: raw }
+}
+
 type RouteParams = { params: Promise<{ id: string }> }
 
 export async function POST(req: Request, { params }: RouteParams) {
   try {
     const ctx = await getPermissionContext()
     if (!ctx) {
-      return NextResponse.json({ error: "未登入。" }, { status: 401 })
+      return jsonError(401, {
+        error: "未登入。",
+        code: "UNAUTHORIZED",
+        step: "auth_session",
+      }, "auth")
     }
     if (ctx.appRole === "viewer") {
-      return NextResponse.json({ error: "你沒有編輯權限。" }, { status: 403 })
+      return jsonError(403, {
+        error: "你沒有編輯權限。",
+        code: "FORBIDDEN",
+        step: "auth_role",
+      }, "auth")
     }
 
     const { id: itemId } = await params
     if (!itemId?.trim()) {
-      return NextResponse.json({ error: "缺少內容 id。" }, { status: 400 })
+      return jsonError(400, {
+        error: "缺少內容 id。",
+        code: "BAD_REQUEST",
+        step: "validate_params",
+      }, "validate")
     }
 
-    const supabase = await createSupabaseServerClient()
+    const userSb = await createSupabaseServerClient()
 
-    const { data: item, error: itemErr } = await supabase
+    const { data: item, error: itemErr } = await userSb
       .from("content_items")
       .select("id, client_id")
       .eq("id", itemId)
       .maybeSingle()
 
     if (itemErr || !item) {
-      return NextResponse.json({ error: "找不到內容項目。" }, { status: 404 })
+      return jsonError(404, {
+        error: "找不到內容項目。",
+        code: "NOT_FOUND",
+        step: "load_content_item",
+        detail: itemErr?.message,
+      }, "item", itemErr?.message)
     }
 
     if (!canEditClient(ctx, item.client_id)) {
-      return NextResponse.json({ error: "你沒有權限為此客戶上傳附件。" }, { status: 403 })
+      return jsonError(403, {
+        error: "你沒有權限為此客戶上傳附件。",
+        code: "FORBIDDEN",
+        step: "permission_client",
+      }, "perm")
+    }
+
+    let admin: ReturnType<typeof createSupabaseServiceRoleClient>
+    try {
+      admin = createSupabaseServiceRoleClient()
+    } catch (envErr) {
+      const msg = envErr instanceof Error ? envErr.message : String(envErr)
+      console.error("[attachments] service client:", msg)
+      return jsonError(503, {
+        error: "伺服器未設定 SUPABASE_SERVICE_ROLE_KEY，無法完成上傳。",
+        code: "SERVICE_ROLE_MISSING",
+        step: "service_client",
+      }, "env")
     }
 
     const formData = await req.formData()
     const file = formData.get("file")
     if (!(file instanceof File)) {
-      return NextResponse.json({ error: "請提供檔案欄位 file。" }, { status: 400 })
+      return jsonError(400, {
+        error: "請提供檔案欄位 file。",
+        code: "BAD_REQUEST",
+        step: "validate_file",
+      }, "validate")
     }
 
     if (file.size > MAX_BYTES) {
-      return NextResponse.json(
-        { error: "檔案過大（上限 12MB）。" },
-        { status: 413 },
-      )
+      return jsonError(413, {
+        error: "檔案過大（上限 12MB）。",
+        code: "PAYLOAD_TOO_LARGE",
+        step: "validate_file",
+      }, "validate")
     }
 
-    const mime = file.type || "application/octet-stream"
+    const mime = normalizeImageMime(file)
     if (!ALLOWED.has(mime)) {
-      return NextResponse.json(
-        { error: "不支援的圖片格式，請使用 JPEG、PNG、WebP、GIF 或 SVG。" },
-        { status: 400 },
-      )
+      return jsonError(400, {
+        error: "不支援的圖片格式，請使用 JPEG、PNG、WebP、GIF 或 SVG。",
+        code: "UNSUPPORTED_MIME",
+        step: "validate_mime",
+        detail: mime || "(empty)",
+      }, "mime", mime)
     }
 
     const labelRaw = formData.get("type")
@@ -93,7 +189,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     const objectPath = `${CONTENT_MEDIA_ITEMS_PREFIX}/${itemId}/${Date.now()}-${crypto.randomUUID().slice(0, 10)}.${ext}`
 
     const buffer = Buffer.from(await file.arrayBuffer())
-    const { error: uploadErr } = await supabase.storage
+    const { error: uploadErr } = await admin.storage
       .from(CONTENT_MEDIA_BUCKET)
       .upload(objectPath, buffer, {
         contentType: mime,
@@ -101,21 +197,21 @@ export async function POST(req: Request, { params }: RouteParams) {
       })
 
     if (uploadErr) {
-      console.error("[attachments] storage upload:", uploadErr.message)
-      return NextResponse.json(
-        {
-          error: `上傳失敗：${uploadErr.message}。請確認 Storage bucket「${CONTENT_MEDIA_BUCKET}」已建立且政策允許已登入使用者上傳。`,
-        },
-        { status: 500 },
-      )
+      const mapped = mapStorageErrorMessage(uploadErr.message)
+      return jsonError(500, {
+        error: `${mapped.hint}（${mapped.code}）`,
+        code: mapped.code,
+        step: "storage_upload",
+        detail: uploadErr.message,
+      }, "storage", uploadErr.message)
     }
 
-    const { data: pub } = supabase.storage
+    const { data: pub } = admin.storage
       .from(CONTENT_MEDIA_BUCKET)
       .getPublicUrl(objectPath)
     const publicUrl = pub.publicUrl
 
-    const { data: lastRow } = await supabase
+    const { data: lastRow } = await admin
       .from("content_attachments")
       .select("sort_order")
       .eq("content_item_id", itemId)
@@ -125,7 +221,7 @@ export async function POST(req: Request, { params }: RouteParams) {
 
     const sortOrder = (lastRow?.sort_order ?? -1) + 1
 
-    const { data: row, error: insErr } = await supabase
+    const { data: row, error: insErr } = await admin
       .from("content_attachments")
       .insert({
         content_item_id: itemId,
@@ -137,21 +233,38 @@ export async function POST(req: Request, { params }: RouteParams) {
       .single()
 
     if (insErr || !row) {
-      console.error("[attachments] insert:", insErr?.message)
-      return NextResponse.json(
-        { error: `已上傳檔案，但寫入附件紀錄失敗：${insErr?.message ?? "unknown"}` },
-        { status: 500 },
-      )
+      const { error: rmErr } = await admin.storage
+        .from(CONTENT_MEDIA_BUCKET)
+        .remove([objectPath])
+      if (rmErr) {
+        console.error("[attachments] rollback storage remove:", rmErr.message)
+      }
+      return jsonError(500, {
+        error: `已上傳至 Storage，但寫入附件紀錄失敗：${insErr?.message ?? "unknown"}。已嘗試刪除暫存物件。`,
+        code: "ATTACHMENT_INSERT_FAILED",
+        step: "attachment_insert",
+        detail: insErr?.message,
+      }, "db", insErr?.message)
     }
 
     if (sortOrder === 0) {
-      const { error: thumbErr } = await supabase
+      const { error: thumbErr } = await admin
         .from("content_items")
         .update({ thumbnail: publicUrl })
         .eq("id", itemId)
 
       if (thumbErr) {
         console.warn("[attachments] thumbnail update:", thumbErr.message)
+        return NextResponse.json({
+          ok: true,
+          attachment: row,
+          url: publicUrl,
+          warning: {
+            step: "thumbnail_update",
+            code: "THUMBNAIL_UPDATE_FAILED",
+            message: thumbErr.message,
+          },
+        })
       }
     }
 
@@ -162,6 +275,11 @@ export async function POST(req: Request, { params }: RouteParams) {
     })
   } catch (e) {
     const message = e instanceof Error ? e.message : "上傳失敗。"
-    return NextResponse.json({ error: message }, { status: 500 })
+    console.error("[attachments] unhandled:", message)
+    return jsonError(500, {
+      error: message,
+      code: "INTERNAL",
+      step: "unhandled",
+    }, "fatal", message)
   }
 }

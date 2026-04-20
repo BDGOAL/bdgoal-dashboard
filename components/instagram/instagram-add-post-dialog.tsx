@@ -86,27 +86,29 @@ function displayStatusToSubmit(
     }
   }
 
+  /* 儲存草稿：草稿／待審核／已排程（僅 UI）皆可不填日期；選填日期則以 planning + planned_publish_date 保存 */
   if (display === "published") {
     return { error: "若要標示為已發佈，請按「發佈」。" }
   }
 
-  if (display === "scheduled") {
-    const err = validateStatusAndScheduledAt("scheduled", scheduledLocal)
-    if (err) return { error: "狀態為「已排程」時請填寫日期與時間。" }
+  const notes =
+    display === "needsApproval" ? INSTAGRAM_NEEDS_APPROVAL_LOCAL_MARKER : null
+
+  if (scheduledLocal.trim() !== "") {
+    const iso = toPlannedPublishDateIso(scheduledLocal)
+    if (!iso) {
+      return { error: "日期與時間格式無效，請修正或留空。" }
+    }
     return {
-      status: "scheduled",
-      plannedPublishDate: toPlannedPublishDateIso(scheduledLocal),
-      localNotes: null,
+      status: "planning",
+      plannedPublishDate: iso,
+      localNotes: notes,
     }
   }
 
-  const notes =
-    display === "needsApproval" ? INSTAGRAM_NEEDS_APPROVAL_LOCAL_MARKER : null
-  const iso =
-    scheduledLocal.trim() === "" ? null : toPlannedPublishDateIso(scheduledLocal)
   return {
     status: "planning",
-    plannedPublishDate: iso,
+    plannedPublishDate: null,
     localNotes: notes,
   }
 }
@@ -590,7 +592,7 @@ export function InstagramAddPostDialog({
                 </div>
                 <div className="space-y-1">
                   <Label htmlFor="ig-compose-when" className="text-xs">
-                    日期與時間
+                    日期與時間（選填；按「排程」時必填）
                   </Label>
                   <Input
                     id="ig-compose-when"
@@ -606,7 +608,7 @@ export function InstagramAddPostDialog({
               {error ? <p className="text-destructive text-xs">{error}</p> : null}
               <p className="text-muted-foreground text-[11px] leading-relaxed">
                 流程：先建立內容項目，再上傳圖片。若上傳失敗，貼文仍會保留，可再按「儲存草稿」僅重試上傳。
-                「儲存草稿」為 planning；「排程」須有時間；「發佈」為 published。
+                「儲存草稿」／待審核可不填日期；有填則一併儲存為預計時間。「排程」按鈕須有時間；「發佈」為 published。
               </p>
             </div>
           </div>
