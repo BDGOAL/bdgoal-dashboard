@@ -23,14 +23,13 @@ export function isInstagramPersistableItem(item: ContentItem): boolean {
   )
 }
 
-/**
- * TODO: POST `/api/content/items/reorder` with `{ orderedIds: string[], clientId, platform }`
- * when product defines canonical feed order persistence.
- */
-export async function persistInstagramGridOrderPlaceholder(
-  _orderedDraggableItems: ContentItem[],
-): Promise<void> {
-  void _orderedDraggableItems
+/** 僅 id（例如 Grid 排序 API） */
+export function isPersistableContentItemId(id: string): boolean {
+  if (id.startsWith("ig-")) return false
+  return (
+    id.startsWith("cnt-") ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+  )
 }
 
 export async function persistInstagramPlannedDateChange(args: {

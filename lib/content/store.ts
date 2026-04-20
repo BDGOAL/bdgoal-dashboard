@@ -19,12 +19,16 @@ export type DashboardStoredContentItem = {
   caption: string
   tags: string[]
   plannedPublishDate?: string | null
+  /** 若指定則一併寫入 `scheduled_at`（否則 upsert 不覆寫該欄） */
+  scheduledAt?: string | null
   status: "planning" | "scheduled" | "published"
   attachments: Array<{
     name: string
     url: string
   }>
   localNotes?: string | null
+  /** 若指定則寫入 `instagram_order`（否則不覆寫，避免 Asana 同步洗掉排序） */
+  instagramOrder?: number | null
   createdAt: string
   updatedAt: string
 }
@@ -99,6 +103,29 @@ function slugifyClientLabel(trimmed: string): string {
 
 function isUniqueViolation(error: { code?: string } | null | undefined): boolean {
   return error?.code === "23505"
+}
+
+function isInstagramPlatformDb(platform: string): boolean {
+  const v = platform.trim().toLowerCase()
+  return v === "instagram" || v === "ig"
+}
+
+/** 同一客戶底下所有 Instagram／ig 列之最大 `instagram_order` + 1（無則 0） */
+async function nextInstagramWallOrder(
+  supabase: SupabaseClient,
+  clientId: string,
+): Promise<number> {
+  const { data, error } = await supabase
+    .from("content_items")
+    .select("instagram_order, platform")
+    .eq("client_id", clientId)
+  if (error) throw new Error(`讀取排序失敗：${error.message}`)
+  const nums = (data ?? [])
+    .filter((r) => isInstagramPlatformDb(r.platform))
+    .map((r) => r.instagram_order)
+    .filter((n): n is number => typeof n === "number" && Number.isFinite(n))
+  if (!nums.length) return 0
+  return Math.max(...nums) + 1
 }
 
 async function insertNewClientByName(
@@ -325,8 +352,7 @@ export async function upsertStoredContentItem(
 ): Promise<DashboardStoredContentItem> {
   const supabase = await createSupabaseServerClient()
   const clientId = await deriveClientId(item.client)
-  const payload = {
-    // content_items.id is uuid in Supabase; only pass through valid uuid.
+  const payload: Record<string, unknown> = {
     id: isUuid(item.id) ? item.id : undefined,
     client_id: clientId,
     platform: item.platform,
@@ -340,13 +366,24 @@ export async function upsertStoredContentItem(
     position: item.position ?? null,
     internal_notes: item.localNotes ?? null,
   }
-  const { data, error } = await supabase.from("content_items").upsert(payload).select("*").single()
+  if (item.scheduledAt !== undefined) {
+    payload.scheduled_at = item.scheduledAt
+  }
+  if (item.instagramOrder !== undefined) {
+    payload.instagram_order = item.instagramOrder
+  }
+  const { data, error } = await supabase
+    .from("content_items")
+    .upsert(payload)
+    .select("*")
+    .single()
   if (error) throw new Error(`儲存內容失敗：${error.message}`)
   return {
     ...item,
     id: data.id,
     createdAt: data.created_at,
     updatedAt: data.updated_at,
+    instagramOrder: data.instagram_order ?? item.instagramOrder,
   }
 }
 
@@ -354,6 +391,15 @@ export async function createManualContentItem(
   input: CreateManualInput,
 ): Promise<DashboardStoredContentItem> {
   const now = new Date().toISOString()
+  const ctx = await getPermissionContext()
+  if (!ctx) throw new Error("未登入，無法新增內容。")
+  const supabase = await createSupabaseServerClient()
+  const clientId = await deriveClientId(input.client.trim())
+  const plat = input.platform.trim().toLowerCase()
+  let igOrder: number | undefined
+  if (plat === "instagram" || plat === "ig") {
+    igOrder = await nextInstagramWallOrder(supabase, clientId)
+  }
   const item: DashboardStoredContentItem = {
     id: crypto.randomUUID(),
     source: "manual",
@@ -366,15 +412,48 @@ export async function createManualContentItem(
     caption: input.caption.trim(),
     tags: input.tags ?? [],
     plannedPublishDate: input.plannedPublishDate ?? null,
+    scheduledAt: null,
     status: input.status,
     attachments: [],
     localNotes: input.localNotes ?? null,
+    instagramOrder: igOrder,
     createdAt: now,
     updatedAt: now,
   }
-  const ctx = await getPermissionContext()
-  if (!ctx) throw new Error("未登入，無法新增內容。")
   return upsertStoredContentItem(item)
+}
+
+/**
+ * 持久化 Instagram 牆面順序（`instagram_order` = 陣列索引）。
+ * 呼叫端須已驗證權限；`orderedIds` 須與該客戶底下所有 Instagram 列 id 一致。
+ */
+export async function reorderInstagramWallItems(input: {
+  clientId: string
+  orderedIds: string[]
+}): Promise<void> {
+  const supabase = await createSupabaseServerClient()
+  const { data: rows, error: qErr } = await supabase
+    .from("content_items")
+    .select("id, client_id, platform")
+    .eq("client_id", input.clientId)
+  if (qErr) throw new Error(`讀取內容失敗：${qErr.message}`)
+  const igRows = (rows ?? []).filter((r) => isInstagramPlatformDb(r.platform))
+  const expected = new Set(igRows.map((r) => r.id))
+  if (expected.size !== input.orderedIds.length) {
+    throw new Error("排序列表須包含此客戶所有 Instagram 貼文。")
+  }
+  for (const id of input.orderedIds) {
+    if (!expected.has(id)) {
+      throw new Error("排序列表含有不屬於此客戶或平台的項目。")
+    }
+  }
+  for (let i = 0; i < input.orderedIds.length; i++) {
+    const { error } = await supabase
+      .from("content_items")
+      .update({ instagram_order: i })
+      .eq("id", input.orderedIds[i])
+    if (error) throw new Error(`更新排序失敗：${error.message}`)
+  }
 }
 
 export async function updateStoredContentItem(

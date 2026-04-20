@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -8,14 +9,17 @@ import {
   Camera,
   Inbox,
   LayoutDashboard,
+  MoreHorizontal,
   Newspaper,
   Users,
 } from "lucide-react"
 
 import { dashboardNavItems } from "@/lib/navigation/dashboard-nav"
+import { useShowInstagramPlanner } from "@/lib/preferences/show-instagram-planner"
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -44,6 +48,8 @@ function NavIcon({ id }: { id: string }) {
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const [showInstagramPlanner, setShowInstagramPlanner] = useShowInstagramPlanner()
+  const [navMenuOpen, setNavMenuOpen] = React.useState(false)
 
   return (
     <Sidebar collapsible="icon" variant="inset">
@@ -66,6 +72,7 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {dashboardNavItems.map((item) => {
+                if (item.id === "instagram" && !showInstagramPlanner) return null
                 const active =
                   item.href === "/"
                     ? pathname === "/"
@@ -88,6 +95,32 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+      <SidebarFooter className="border-sidebar-border/80 border-t p-2">
+        <div className="px-1">
+          <button
+            type="button"
+            className="text-sidebar-foreground/85 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+            aria-expanded={navMenuOpen}
+            onClick={() => setNavMenuOpen((o) => !o)}
+          >
+            <MoreHorizontal className="size-4 shrink-0 opacity-90" aria-hidden />
+            <span className="group-data-[collapsible=icon]:hidden">選單</span>
+          </button>
+          {navMenuOpen ? (
+            <div className="border-sidebar-border bg-sidebar text-sidebar-foreground mt-1 space-y-2 rounded-md border p-2 shadow-sm">
+              <label className="flex cursor-pointer items-start gap-2 text-xs leading-snug">
+                <input
+                  type="checkbox"
+                  checked={showInstagramPlanner}
+                  onChange={(e) => setShowInstagramPlanner(e.target.checked)}
+                  className="border-input bg-background mt-0.5 size-3.5 shrink-0 rounded"
+                />
+                <span>顯示 Instagram 規劃</span>
+              </label>
+            </div>
+          ) : null}
+        </div>
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   )

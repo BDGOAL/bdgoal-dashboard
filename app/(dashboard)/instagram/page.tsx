@@ -24,7 +24,7 @@ const InstagramManager = dynamic(
 export default async function InstagramPage() {
   const items = await getDashboardContentItems()
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 max-w-full space-y-6 overflow-x-hidden">
       <PageIntro
         title="Instagram"
         description="BDGoal \u7684\u6392\u7a0b\u6d41\u7a0b\u4ee5 Asana Ready Queue \u70ba\u4e3b\u4f86\u6e90\uff1b\u4e0b\u65b9\u4ecd\u53ef\u7528\u65e2\u6709\u6b0a\u4f4d\u6aa2\u8996\u8207\u624b\u52d5\u88dc\u5145\u3002"

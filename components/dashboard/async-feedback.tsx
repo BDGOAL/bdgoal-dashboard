@@ -21,6 +21,8 @@ export const FEEDBACK_COPY = {
   addSyncing: "同步中…",
   /** 新增對話框：圖片上傳至 Storage */
   addUploadingMedia: "上傳圖片中…",
+  /** Instagram 規劃：建立項目後背景上傳附件（非阻斷） */
+  plannerBackgroundUpload: "正在上傳圖片…",
 } as const
 
 type DialogInlineToastProps = {

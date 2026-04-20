@@ -53,6 +53,21 @@ function stripExtension(name: string): string {
  * 將圖片縮放並輸出為 JPEG，以縮小 multipart 本文。
  * SVG 不經 canvas 重繪（避免複雜度），原檔回傳；若仍過大由呼叫端提示。
  */
+/** 批次壓縮（例如建立貼文後於背景上傳） */
+export async function compressFilesForPlannerUpload(files: File[]): Promise<File[]> {
+  return Promise.all(
+    files.map(async (file) => {
+      const f = await compressImageForPlannerUpload(file)
+      if (f.size > PLANNER_UPLOAD_MAX_OUTPUT_BYTES) {
+        throw new Error(
+          `「${file.name}」壓縮後仍約 ${(f.size / (1024 * 1024)).toFixed(1)}MB，請改用小圖或降低解析度。`,
+        )
+      }
+      return f
+    }),
+  )
+}
+
 export async function compressImageForPlannerUpload(file: File): Promise<File> {
   if (!file.type.startsWith("image/")) {
     throw new Error("請選擇圖片檔。")

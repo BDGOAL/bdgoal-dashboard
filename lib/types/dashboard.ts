@@ -87,6 +87,10 @@ export type ContentItem = {
    * 同上，Dashboard 內部維度／fallback，**非** Asana 社群帳號欄位。
    */
   accountId: string
+  /**
+   * `content_items.instagram_order`：同客戶＋Instagram 牆面由左而右、由上而下之順序（null 則排在已定序項目之後）。
+   */
+  instagramOrder?: number | null
 }
 
 /** Slim row for dashboard overview */

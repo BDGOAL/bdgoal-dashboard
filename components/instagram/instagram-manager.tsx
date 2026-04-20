@@ -25,10 +25,66 @@ import {
 import {
   contentItemStatusToApi,
   isInstagramPersistableItem,
+  isPersistableContentItemId,
   persistInstagramPlannedDateChange,
 } from "@/lib/instagram/instagram-ui-persistence"
+import { sortInstagramWallItems } from "@/lib/instagram/instagram-wall-sort"
+import { compressFilesForPlannerUpload } from "@/lib/instagram/instagram-image-upload-client"
+import { uploadContentItemAttachmentsSequential } from "@/lib/instagram/instagram-compose-upload"
+import { FEEDBACK_COPY } from "@/components/dashboard/async-feedback"
+import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { ImageIcon } from "lucide-react"
+import { ImageIcon, Loader2 } from "lucide-react"
+
+function plannerPlaceholderItem(
+  id: string,
+  clientId: string,
+  title: string,
+  caption: string,
+): ContentItem {
+  const brandId = `br-${clientId}`
+  return {
+    id,
+    source: "manual",
+    title,
+    caption,
+    platform: "instagram",
+    postType: "feed",
+    status: "published",
+    scheduledAt: null,
+    publishedAt: null,
+    plannedPublishDate: null,
+    updatedAt: new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    tags: [],
+    thumbnail: null,
+    author: "手動",
+    clientId,
+    brandId,
+    accountId: `acc-${clientId}-instagram`,
+    instagramOrder: null,
+    attachments: [],
+  }
+}
+
+function reorderRowsByIds(rows: ContentItem[], orderedIds: string[]): ContentItem[] {
+  const m = new Map(rows.map((i) => [i.id, i]))
+  return orderedIds.map((id) => m.get(id)).filter(Boolean) as ContentItem[]
+}
+
+type BgUploadState =
+  | {
+      kind: "working"
+      itemId: string
+      message: string
+    }
+  | {
+      kind: "error"
+      itemId: string
+      files: File[]
+      error: string
+      uploadFailedIndices: number[] | null
+    }
 
 export function InstagramManager({ items }: { items: ContentItem[] }) {
   const { scope } = useWorkspaceScope()
@@ -63,7 +119,8 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
 
   const filteredItems = React.useMemo(() => {
     if (!clientOk) return []
-    return filterInstagramItemsForClient(items, scope.clientId)
+    const raw = filterInstagramItemsForClient(items, scope.clientId)
+    return sortInstagramWallItems(raw)
   }, [items, clientOk, scope])
 
   const resolvedClientLabel = React.useMemo(() => {
@@ -83,6 +140,8 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
   const [detailsOpen, setDetailsOpen] = React.useState(false)
 
   const [rows, setRows] = React.useState(filteredItems)
+  const [reorderError, setReorderError] = React.useState<string | null>(null)
+  const [bgUpload, setBgUpload] = React.useState<BgUploadState | null>(null)
 
   React.useEffect(() => {
     setRows(filteredItems)
@@ -100,7 +159,8 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
             setRows([])
             return
           }
-          setRows(filterInstagramItemsForClient(all, scope.clientId))
+          const raw = filterInstagramItemsForClient(all, scope.clientId)
+          setRows(sortInstagramWallItems(raw))
         } else {
           throw new Error(
             "\u7121\u6cd5\u8207\u4f3a\u670d\u5668\u540c\u6b65\u5217\u8868\uff0c\u8acb\u7a0d\u5f8c\u518d\u8a66\u3002",
@@ -119,15 +179,30 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
     setDetailsOpen(true)
   }
 
-  function handleGridOrderChange(reorderedDraggableItems: ContentItem[]) {
-    setRows((prev) => {
-      const dragIdSet = new Set(reorderedDraggableItems.map((i) => i.id))
-      const published = prev.filter((i) => i.status === "published")
-      const orphans = prev.filter(
-        (i) => i.status !== "published" && !dragIdSet.has(i.id),
-      )
-      return [...reorderedDraggableItems, ...orphans, ...published]
-    })
+  async function handleWallOrderCommit(orderedIds: string[]) {
+    if (!clientOk) return
+    if (!orderedIds.every((id) => isPersistableContentItemId(id))) {
+      setReorderError("含無法寫入的示範項目，已略過排序同步。")
+      return
+    }
+    setReorderError(null)
+    const snapshot = [...rows]
+    setRows(reorderRowsByIds(rows, orderedIds))
+    try {
+      const res = await fetch("/api/content/items/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clientId: scope.clientId, orderedIds }),
+      })
+      const json = (await res.json().catch(() => ({}))) as { error?: string }
+      if (!res.ok) {
+        throw new Error(json.error ?? "排序更新失敗。")
+      }
+    } catch (e) {
+      setRows(snapshot)
+      const msg = e instanceof Error ? e.message : "排序更新失敗。"
+      setReorderError(msg)
+    }
   }
 
   function handleCalendarReschedule(prev: ContentItem, next: ContentItem) {
@@ -145,11 +220,145 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
     })()
   }
 
+  async function runBackgroundUpload(itemId: string, files: File[]) {
+    setBgUpload({ kind: "working", itemId, message: FEEDBACK_COPY.plannerBackgroundUpload })
+    try {
+      const compressed = await compressFilesForPlannerUpload(files)
+      const batch = await uploadContentItemAttachmentsSequential(itemId, compressed)
+      if (!batch.ok) {
+        if (batch.kind === "network") {
+          setBgUpload({
+            kind: "error",
+            itemId,
+            files: compressed,
+            error: batch.error,
+            uploadFailedIndices: batch.retryIndices,
+          })
+        } else {
+          setBgUpload({
+            kind: "error",
+            itemId,
+            files: compressed,
+            error: batch.failures.map((f) => f.error).join("；") || "部分圖片未上傳。",
+            uploadFailedIndices: batch.failures.map((f) => f.index),
+          })
+        }
+        await refreshRows()
+        return
+      }
+      setBgUpload(null)
+      await refreshRows()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "上傳失敗。"
+      setBgUpload({
+        kind: "error",
+        itemId,
+        files,
+        error: msg,
+        uploadFailedIndices: null,
+      })
+      await refreshRows()
+    }
+  }
+
+  function handlePostCreated(payload: {
+    id: string
+    title: string
+    caption: string
+    files: File[]
+  }) {
+    if (!clientOk) return
+    const ph = plannerPlaceholderItem(payload.id, scope.clientId, payload.title, payload.caption)
+    setRows((prev) => {
+      const rest = prev.filter((i) => i.id !== ph.id)
+      return [ph, ...rest]
+    })
+    void refreshRows()
+    if (payload.files.length > 0) {
+      void runBackgroundUpload(payload.id, payload.files)
+    }
+  }
+
+  async function retryBackgroundUpload() {
+    if (!bgUpload || bgUpload.kind !== "error") return
+    const { itemId, files, uploadFailedIndices } = bgUpload
+    setBgUpload({ kind: "working", itemId, message: FEEDBACK_COPY.plannerBackgroundUpload })
+    try {
+      const indices =
+        uploadFailedIndices?.length && uploadFailedIndices.length < files.length
+          ? uploadFailedIndices
+          : files.map((_, i) => i)
+      const batch = await uploadContentItemAttachmentsSequential(itemId, files, { indices })
+      if (!batch.ok) {
+        if (batch.kind === "network") {
+          setBgUpload({
+            kind: "error",
+            itemId,
+            files,
+            error: batch.error,
+            uploadFailedIndices: batch.retryIndices,
+          })
+        } else {
+          setBgUpload({
+            kind: "error",
+            itemId,
+            files,
+            error: "仍有圖片未上傳，請再試。",
+            uploadFailedIndices: batch.failures.map((f) => f.index),
+          })
+        }
+        await refreshRows()
+        return
+      }
+      setBgUpload(null)
+      await refreshRows()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "上傳失敗。"
+      setBgUpload({
+        kind: "error",
+        itemId,
+        files,
+        error: msg,
+        uploadFailedIndices: null,
+      })
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-w-0 max-w-full flex-col gap-3">
       {loading ? <ListSyncStatus /> : null}
 
       <InstagramClientBar clientName={resolvedClientLabel} />
+
+      {bgUpload ? (
+        <div
+          role="status"
+          className="text-muted-foreground flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/15 px-3 py-2 text-xs"
+        >
+          {bgUpload.kind === "working" ? (
+            <>
+              <Loader2 className="size-3.5 shrink-0 animate-spin opacity-90" aria-hidden />
+              <span>{bgUpload.message}</span>
+            </>
+          ) : (
+            <>
+              <span className="text-destructive">{bgUpload.error}</span>
+              <Button type="button" size="sm" variant="outline" onClick={() => void retryBackgroundUpload()}>
+                重試上傳
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setBgUpload(null)}>
+                關閉
+              </Button>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {reorderError ? (
+        <p className="text-destructive text-xs" role="alert">
+          {reorderError}（已還原順序，請稍後再試。）
+        </p>
+      ) : null}
 
       {!clientOk ? (
         <EmptyState
@@ -160,11 +369,17 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
         />
       ) : (
         <>
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-            <InstagramViewSwitcher value={mainView} onValueChange={setMainView} />
-            <div className="flex items-center justify-end gap-2">
+          <div
+            className={cn(
+              "flex min-w-0 max-w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between",
+            )}
+          >
+            <div className="min-w-0 shrink">
+              <InstagramViewSwitcher value={mainView} onValueChange={setMainView} />
+            </div>
+            <div className="flex min-w-0 shrink-0 items-center justify-end gap-2">
               <InstagramAddPostDialog
-                onAdded={() => refreshRows()}
+                onPostCreated={handlePostCreated}
                 workspaceContentItems={filterByPlatform(items, "instagram")}
                 apiClientName={apiClientName}
               />
@@ -173,7 +388,7 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
 
           <div
             className={cn(
-              "transition-opacity duration-200 ease-out",
+              "min-w-0 max-w-full transition-opacity duration-200 ease-out",
               loading && "pointer-events-none opacity-[0.72]",
             )}
             aria-busy={loading}
@@ -183,7 +398,7 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
                 items={rows}
                 clientDisplayName={resolvedClientLabel ?? "此客戶"}
                 onRequestDetails={openDetails}
-                onGridOrderChange={handleGridOrderChange}
+                onWallOrderCommit={handleWallOrderCommit}
               />
             ) : (
               <InstagramCalendarView

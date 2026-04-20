@@ -23,6 +23,7 @@ type DbContentItem = {
   position: string | null
   thumbnail: string | null
   internal_notes: string | null
+  instagram_order?: number | null
   created_at: string
   updated_at: string
 }
@@ -113,6 +114,7 @@ function mapDbRowToDashboard(
     clientId: refs.clientId,
     brandId: refs.brandId,
     accountId: refs.accountId,
+    instagramOrder: row.instagram_order ?? null,
   }
 }
 
@@ -135,6 +137,7 @@ export async function listDashboardContentItems(): Promise<ContentItem[]> {
       )
     `,
     )
+    .order("instagram_order", { ascending: true, nullsFirst: false })
     .order("updated_at", { ascending: false })
   if (error) throw new Error(`讀取 content_items 失敗：${error.message}`)
 

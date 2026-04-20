@@ -19,31 +19,13 @@ import type { ContentPostType } from "@/lib/types/dashboard"
 import type { ContentItem } from "@/lib/types/dashboard"
 import { useWorkspaceScope } from "@/components/dashboard/workspace-scope-context"
 import { cn } from "@/lib/utils"
-import { toPlannedPublishDateIso, validateStatusAndScheduledAt } from "@/components/instagram/status-schedule-rules"
-import {
-  DialogInlineToast,
-  FEEDBACK_COPY,
-  PendingButtonLabel,
-} from "@/components/dashboard/async-feedback"
-import {
-  INSTAGRAM_NEEDS_APPROVAL_LOCAL_MARKER,
-  instagramDisplayStatusLabel,
-  type InstagramDisplayStatus,
-} from "@/lib/instagram/instagram-display-status"
+import { FEEDBACK_COPY, PendingButtonLabel } from "@/components/dashboard/async-feedback"
 import { isInstagramClientScope } from "@/lib/instagram/instagram-scope"
-import { uploadContentItemAttachmentsSequential } from "@/lib/instagram/instagram-compose-upload"
 import {
-  compressImageForPlannerUpload,
   PLANNER_UPLOAD_MAX_EDGE,
   PLANNER_UPLOAD_MAX_FILES,
-  PLANNER_UPLOAD_MAX_OUTPUT_BYTES,
   validatePlannerImageFileForQueue,
 } from "@/lib/instagram/instagram-image-upload-client"
-
-const selectClass = cn(
-  "border-input bg-background dark:bg-input/30 h-9 w-full rounded-md border px-2 text-sm shadow-none outline-none",
-  "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-2",
-)
 
 type SurfaceTab = "post" | "story" | "reels"
 
@@ -53,91 +35,25 @@ function surfaceTabToContentType(tab: SurfaceTab): ContentPostType {
   return "feed"
 }
 
-type SubmitMode = "draft" | "schedule" | "publish"
-
 type InstagramAddPostDialogProps = {
-  onAdded: () => void | Promise<void>
+  /** 可選：額外同步（例如 refetch）；若已在 onPostCreated 內處理可省略。 */
+  onAdded?: () => void | Promise<void>
+  /** POST 成功後（關閉視窗後）交給父層背景上傳圖片 */
+  onPostCreated?: (payload: {
+    id: string
+    title: string
+    caption: string
+    files: File[]
+  }) => void
   workspaceContentItems: ContentItem[]
-  /** 來自 /api/clients 的顯示名，與頂端選定客戶對齊 */
   apiClientName: string | null
 }
 
-type ToastState = { message: string } | null
-
 type MediaSlot = { file: File; previewUrl: string }
 
-async function buildCompressedFilesForSlots(slots: MediaSlot[]): Promise<File[]> {
-  return Promise.all(
-    slots.map(async (slot) => {
-      const f = await compressImageForPlannerUpload(slot.file)
-      if (f.size > PLANNER_UPLOAD_MAX_OUTPUT_BYTES) {
-        throw new Error(
-          `「${slot.file.name}」壓縮後仍約 ${(f.size / (1024 * 1024)).toFixed(1)}MB，請改用小圖或降低解析度。`,
-        )
-      }
-      return f
-    }),
-  )
-}
-
-function displayStatusToSubmit(
-  display: InstagramDisplayStatus,
-  mode: SubmitMode,
-  scheduledLocal: string,
-):
-  | {
-      status: "planning" | "scheduled" | "published"
-      plannedPublishDate: string | null
-      localNotes: string | null
-    }
-  | { error: string } {
-  if (mode === "publish") {
-    return {
-      status: "published",
-      plannedPublishDate: null,
-      localNotes: null,
-    }
-  }
-
-  if (mode === "schedule") {
-    const err = validateStatusAndScheduledAt("scheduled", scheduledLocal)
-    if (err) return { error: err }
-    return {
-      status: "scheduled",
-      plannedPublishDate: toPlannedPublishDateIso(scheduledLocal),
-      localNotes: null,
-    }
-  }
-
-  /* 儲存草稿：草稿／待審核／已排程（僅 UI）皆可不填日期；選填日期則以 planning + planned_publish_date 保存 */
-  if (display === "published") {
-    return { error: "若要標示為已發佈，請按「發佈」。" }
-  }
-
-  const notes =
-    display === "needsApproval" ? INSTAGRAM_NEEDS_APPROVAL_LOCAL_MARKER : null
-
-  if (scheduledLocal.trim() !== "") {
-    const iso = toPlannedPublishDateIso(scheduledLocal)
-    if (!iso) {
-      return { error: "日期與時間格式無效，請修正或留空。" }
-    }
-    return {
-      status: "planning",
-      plannedPublishDate: iso,
-      localNotes: notes,
-    }
-  }
-
-  return {
-    status: "planning",
-    plannedPublishDate: null,
-    localNotes: notes,
-  }
-}
-
 export function InstagramAddPostDialog({
-  onAdded,
+  onAdded: onAddedProp,
+  onPostCreated,
   workspaceContentItems,
   apiClientName,
 }: InstagramAddPostDialogProps) {
@@ -148,26 +64,12 @@ export function InstagramAddPostDialog({
   const [surfaceTab, setSurfaceTab] = React.useState<SurfaceTab>("post")
   const [localTitle, setLocalTitle] = React.useState("")
   const [localCaption, setLocalCaption] = React.useState("")
-  const [displayStatus, setDisplayStatus] =
-    React.useState<InstagramDisplayStatus>("draft")
-  const [scheduledLocal, setScheduledLocal] = React.useState("")
-  const [pending, setPending] = React.useState<false | "post" | "upload" | "sync">(false)
-  /** 建立成功但上傳失敗時，僅重試上傳用 */
-  const [retryItemId, setRetryItemId] = React.useState<string | null>(null)
-  /** 僅重試：對應 `mediaSlots` 的索引（API 失敗時寫入；變更媒體清單時清除） */
-  const [uploadFailedIndices, setUploadFailedIndices] = React.useState<number[] | null>(null)
+  const [pending, setPending] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [toast, setToast] = React.useState<ToastState>(null)
   const [mediaSlots, setMediaSlots] = React.useState<MediaSlot[]>([])
   const [selectedMediaIndex, setSelectedMediaIndex] = React.useState(0)
   const [dragActive, setDragActive] = React.useState(false)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
-
-  React.useEffect(() => {
-    if (!toast) return
-    const timer = setTimeout(() => setToast(null), 2400)
-    return () => clearTimeout(timer)
-  }, [toast])
 
   React.useEffect(() => {
     return () => {
@@ -186,11 +88,7 @@ export function InstagramAddPostDialog({
     setSurfaceTab("post")
     setLocalTitle("")
     setLocalCaption("")
-    setDisplayStatus("draft")
-    setScheduledLocal("")
     setError(null)
-    setRetryItemId(null)
-    setUploadFailedIndices(null)
     setMediaSlots((prev) => {
       for (const s of prev) URL.revokeObjectURL(s.previewUrl)
       return []
@@ -215,7 +113,7 @@ export function InstagramAddPostDialog({
     return hit?.clientName?.trim() ?? null
   }, [apiClientName, clientScope, scope, workspaceContentItems])
 
-  const busy = Boolean(pending)
+  const busy = pending
   const canCompose = clientScope && Boolean(clientLabelForApi)
 
   function appendImageFiles(source: FileList | File[] | null) {
@@ -242,7 +140,6 @@ export function InstagramAddPostDialog({
       }
     }
     setError(null)
-    setUploadFailedIndices(null)
     setMediaSlots((prev) => {
       const next = [...prev]
       for (const file of files) {
@@ -253,7 +150,6 @@ export function InstagramAddPostDialog({
   }
 
   function removeMediaAt(index: number) {
-    setUploadFailedIndices(null)
     setMediaSlots((prev) => {
       if (index < 0 || index >= prev.length) return prev
       const copy = [...prev]
@@ -273,85 +169,8 @@ export function InstagramAddPostDialog({
     setLocalCaption((c) => (c ? `${c}${snippet}` : snippet))
   }
 
-  async function submit(mode: SubmitMode) {
+  async function submit() {
     if (busy || !canCompose || !clientLabelForApi) return
-
-    if (retryItemId) {
-      if (!mediaSlots.length) {
-        setError("請選擇要上傳的圖片後再試，或關閉視窗於列表中稍後補圖。")
-        return
-      }
-      setPending("upload")
-      setError(null)
-      setToast(null)
-      try {
-        let files: File[]
-        try {
-          files = await buildCompressedFilesForSlots(mediaSlots)
-        } catch (prepErr) {
-          const msg =
-            prepErr instanceof Error ? prepErr.message : "圖片處理失敗，請稍後再試。"
-          setError(msg)
-          return
-        }
-        const indices =
-          uploadFailedIndices?.length && uploadFailedIndices.length < files.length
-            ? uploadFailedIndices
-            : files.map((_, i) => i)
-        const batch = await uploadContentItemAttachmentsSequential(retryItemId, files, {
-          indices,
-        })
-        if (!batch.ok) {
-          if (batch.kind === "network") {
-            setUploadFailedIndices(batch.retryIndices)
-            setError(
-              `上傳中斷（${batch.succeededCount}/${indices.length} 已完成）：${batch.error}`,
-            )
-            return
-          }
-          setRetryItemId(retryItemId)
-          setUploadFailedIndices(batch.failures.map((f) => f.index))
-          const failLines = batch.failures
-            .slice(0, 4)
-            .map((f) => `「${f.fileName}」：${f.error}`)
-            .join(" ")
-          const more =
-            batch.failures.length > 4 ? ` 等共 ${batch.failures.length} 個檔案。` : ""
-          setError(
-            `部分圖片未上傳（成功 ${batch.succeededCount}，失敗 ${batch.failures.length}）：${failLines}${more}`,
-          )
-          if (batch.succeededCount > 0) {
-            try {
-              await Promise.resolve(onAdded())
-            } catch {
-              /* sync 錯誤以下方錯誤為主 */
-            }
-          }
-          return
-        }
-        setUploadFailedIndices(null)
-        setPending("sync")
-        try {
-          await Promise.resolve(onAdded())
-        } catch (syncErr) {
-          const msg =
-            syncErr instanceof Error
-              ? syncErr.message
-              : "無法同步最新資料，請稍後再試。"
-          setError(msg)
-          return
-        }
-        setToast({ message: FEEDBACK_COPY.postAdded })
-        await new Promise((resolve) => setTimeout(resolve, 420))
-        reset()
-        setOpen(false)
-      } catch {
-        setError("上傳失敗，請稍後再試。")
-      } finally {
-        setPending(false)
-      }
-      return
-    }
 
     const trimmedTitle = localTitle.trim()
     if (!trimmedTitle) {
@@ -363,26 +182,21 @@ export function InstagramAddPostDialog({
       return
     }
 
-    const mapped = displayStatusToSubmit(displayStatus, mode, scheduledLocal)
-    if ("error" in mapped) {
-      setError(mapped.error)
-      return
-    }
+    const filesSnapshot = mediaSlots.map((s) => s.file)
 
     const createPayload = {
       title: trimmedTitle,
       caption: localCaption.trim(),
-      plannedPublishDate: mapped.plannedPublishDate,
+      plannedPublishDate: null as string | null,
       platform: "instagram" as const,
       contentType: surfaceTabToContentType(surfaceTab),
-      status: mapped.status,
+      status: "published" as const,
       client: clientLabelForApi,
-      localNotes: mapped.localNotes,
+      localNotes: null as string | null,
     }
 
-    setPending("post")
+    setPending(true)
     setError(null)
-    setToast(null)
     try {
       const res = await fetch("/api/content/items", {
         method: "POST",
@@ -403,89 +217,22 @@ export function InstagramAddPostDialog({
         return
       }
 
-      if (mediaSlots.length > 0) {
-        setPending("upload")
-        let files: File[]
-        try {
-          files = await buildCompressedFilesForSlots(mediaSlots)
-        } catch (prepErr) {
-          const msg =
-            prepErr instanceof Error ? prepErr.message : "圖片處理失敗，請稍後再試。"
-          setError(msg)
-          setRetryItemId(newId)
-          setPending("sync")
-          try {
-            await Promise.resolve(onAdded())
-          } catch {
-            /* ignore */
-          }
-          return
-        }
-        const batch = await uploadContentItemAttachmentsSequential(newId, files)
-        if (!batch.ok) {
-          setRetryItemId(newId)
-          if (batch.kind === "network") {
-            setUploadFailedIndices(batch.retryIndices)
-            setError(
-              `貼文已建立，但上傳中斷（${batch.succeededCount}/${files.length} 已完成）：${batch.error}。請再按「儲存草稿」僅重試未完成檔案。`,
-            )
-          } else {
-            setUploadFailedIndices(batch.failures.map((f) => f.index))
-            const failLines = batch.failures
-              .slice(0, 3)
-              .map((f) => `「${f.fileName}」：${f.error}`)
-              .join(" ")
-            const more =
-              batch.failures.length > 3 ? ` 等共 ${batch.failures.length} 個檔案。` : ""
-            setError(
-              `貼文已建立；圖片部分失敗（成功 ${batch.succeededCount}，失敗 ${batch.failures.length}）：${failLines}${more} 可保留圖片後再按「儲存草稿」重試失敗項目。`,
-            )
-          }
-          setPending("sync")
-          try {
-            await Promise.resolve(onAdded())
-          } catch (syncErr) {
-            const msg =
-              syncErr instanceof Error
-                ? syncErr.message
-                : "無法同步最新資料，請稍後再試。"
-            setError(msg)
-          }
-          return
-        }
-        setUploadFailedIndices(null)
-      }
+      onPostCreated?.({
+        id: newId,
+        title: trimmedTitle,
+        caption: localCaption.trim(),
+        files: filesSnapshot,
+      })
 
-      setPending("sync")
-      try {
-        await Promise.resolve(onAdded())
-      } catch (syncErr) {
-        const msg =
-          syncErr instanceof Error
-            ? syncErr.message
-            : "無法同步最新資料，請稍後再試。"
-        setError(msg)
-        return
-      }
-      setToast({ message: FEEDBACK_COPY.postAdded })
-      await new Promise((resolve) => setTimeout(resolve, 520))
       reset()
       setOpen(false)
+      void Promise.resolve(onAddedProp?.())
     } catch {
       setError("新增失敗，請稍後再試。")
     } finally {
       setPending(false)
     }
   }
-
-  const primaryPendingLabel =
-    pending === "sync"
-      ? FEEDBACK_COPY.addSyncing
-      : pending === "upload"
-        ? FEEDBACK_COPY.addUploadingMedia
-        : pending === "post"
-          ? FEEDBACK_COPY.addSubmitting
-          : false
 
   return (
     <>
@@ -523,20 +270,14 @@ export function InstagramAddPostDialog({
           showCloseButton={!pending}
           aria-busy={busy}
         >
-          {toast ? (
-            <div className="px-4 pt-4">
-              <DialogInlineToast type="success" message={toast.message} />
-            </div>
-          ) : null}
           <DialogHeader className="border-border/50 space-y-1 border-b px-4 py-3 text-left">
             <DialogTitle className="text-base">撰寫貼文</DialogTitle>
             <DialogDescription className="text-xs">
-              建立 Instagram 內容並寫入 BDGoal 內容庫；排程後會同步顯示於 Grid 與 Calendar。
+              由此建立的項目預設為已發佈（published），不強制排程日期；圖片可於送出後在背景上傳。
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 md:grid-cols-2">
-            {/* 左：媒體 */}
             <div className="border-border/50 flex flex-col gap-2 border-b p-4 md:border-b-0 md:border-r">
               <Label className="text-muted-foreground text-xs">媒體</Label>
               <div
@@ -627,7 +368,7 @@ export function InstagramAddPostDialog({
                       ))}
                     </div>
                     <p className="text-muted-foreground text-center text-[11px]">
-                      可繼續點擊或拖放加入更多圖片（依序上傳）。
+                      送出後會在背景依序上傳至 Storage（無須等待此視窗）。
                     </p>
                   </div>
                 ) : (
@@ -637,7 +378,8 @@ export function InstagramAddPostDialog({
                       拖放一張或多張圖片，或點擊上傳
                     </p>
                     <p className="text-muted-foreground text-center text-[11px]">
-                      儲存後會依序上傳至 Supabase Storage 並建立附件紀錄。
+                      送出後圖片於背景上傳；長邊約 {PLANNER_UPLOAD_MAX_EDGE}px 壓縮，最多{" "}
+                      {PLANNER_UPLOAD_MAX_FILES} 張。
                     </p>
                   </>
                 )}
@@ -651,7 +393,6 @@ export function InstagramAddPostDialog({
                   disabled={busy}
                   onClick={(e) => {
                     e.stopPropagation()
-                    setUploadFailedIndices(null)
                     setMediaSlots((prev) => {
                       for (const s of prev) URL.revokeObjectURL(s.previewUrl)
                       return []
@@ -664,7 +405,6 @@ export function InstagramAddPostDialog({
               ) : null}
             </div>
 
-            {/* 右：內容 */}
             <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
               <div
                 role="tablist"
@@ -752,50 +492,7 @@ export function InstagramAddPostDialog({
                 />
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <Label htmlFor="ig-compose-status" className="text-xs">
-                    狀態
-                  </Label>
-                  <select
-                    id="ig-compose-status"
-                    className={selectClass}
-                    value={displayStatus}
-                    disabled={busy}
-                    onChange={(e) =>
-                      setDisplayStatus(e.target.value as InstagramDisplayStatus)
-                    }
-                  >
-                    {(Object.keys(instagramDisplayStatusLabel) as InstagramDisplayStatus[]).map(
-                      (k) => (
-                        <option key={k} value={k}>
-                          {instagramDisplayStatusLabel[k]}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <Label htmlFor="ig-compose-when" className="text-xs">
-                    日期與時間（選填；按「排程」時必填）
-                  </Label>
-                  <Input
-                    id="ig-compose-when"
-                    type="datetime-local"
-                    value={scheduledLocal}
-                    disabled={busy || displayStatus === "published"}
-                    onChange={(e) => setScheduledLocal(e.target.value)}
-                    className="h-9"
-                  />
-                </div>
-              </div>
-
               {error ? <p className="text-destructive text-xs">{error}</p> : null}
-              <p className="text-muted-foreground text-[11px] leading-relaxed">
-                圖片僅供編排預覽；上傳前會在瀏覽器內縮放（長邊約 {PLANNER_UPLOAD_MAX_EDGE}px）並轉成
-                JPEG 壓縮，最多 {PLANNER_UPLOAD_MAX_FILES} 張，以符合主機單次請求上限、避免 413。流程：先建立內容項目，再依序上傳；失敗可再按「儲存草稿」重試。
-                「儲存草稿」／待審核可不填日期；「排程」須有時間；「發佈」為 published。
-              </p>
             </div>
           </div>
 
@@ -809,30 +506,12 @@ export function InstagramAddPostDialog({
             >
               取消
             </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={busy}
-              onClick={() => void submit("draft")}
-            >
+            <Button type="button" size="sm" disabled={busy} onClick={() => void submit()}>
               {busy ? (
-                <PendingButtonLabel idle="儲存草稿" pending={primaryPendingLabel} />
+                <PendingButtonLabel idle="新增貼文" pending={FEEDBACK_COPY.addSubmitting} />
               ) : (
-                "儲存草稿"
+                "新增貼文"
               )}
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={busy}
-              onClick={() => void submit("schedule")}
-            >
-              排程
-            </Button>
-            <Button type="button" size="sm" disabled={busy} onClick={() => void submit("publish")}>
-              發佈
             </Button>
           </DialogFooter>
         </DialogContent>

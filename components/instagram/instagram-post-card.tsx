@@ -12,7 +12,7 @@ import {
 import { getInstagramPrimaryImageUrl } from "@/lib/instagram/instagram-media"
 import { cn } from "@/lib/utils"
 
-/** IG 動態／編排常見直向預覽比例（貼文 4:5），牆面維持一致節奏 */
+/** IG 貼文牆 4:5（常見輸出 1080×1350），`object-cover` 填滿畫框 */
 const WALL_ASPECT = "aspect-[4/5]"
 
 function formatScheduleCorner(value: string | null | undefined): string {
