@@ -1,13 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { PlusIcon, Sparkles, Trash2, Upload } from "lucide-react"
+import { PlusIcon, Trash2, Upload } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -15,7 +14,6 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
-import type { ContentPostType } from "@/lib/types/dashboard"
 import type { ContentItem } from "@/lib/types/dashboard"
 import { useWorkspaceScope } from "@/components/dashboard/workspace-scope-context"
 import { cn } from "@/lib/utils"
@@ -24,21 +22,16 @@ import { isInstagramClientScope } from "@/lib/instagram/instagram-scope"
 import {
   PLANNER_UPLOAD_MAX_EDGE,
   PLANNER_UPLOAD_MAX_FILES,
+  PLANNER_UPLOAD_MAX_ORIGINAL_BYTES,
+  PLANNER_UPLOAD_MAX_OUTPUT_BYTES,
   validatePlannerImageFileForQueue,
 } from "@/lib/instagram/instagram-image-upload-client"
 
-type SurfaceTab = "post" | "story" | "reels"
-
-function surfaceTabToContentType(tab: SurfaceTab): ContentPostType {
-  if (tab === "story") return "story"
-  if (tab === "reels") return "reels"
-  return "feed"
-}
+const MAX_ORIGINAL_MB = Math.round(PLANNER_UPLOAD_MAX_ORIGINAL_BYTES / 1024 / 1024)
+const MAX_OUTPUT_MB = (PLANNER_UPLOAD_MAX_OUTPUT_BYTES / 1024 / 1024).toFixed(0)
 
 type InstagramAddPostDialogProps = {
-  /** 可選：額外同步（例如 refetch）；若已在 onPostCreated 內處理可省略。 */
   onAdded?: () => void | Promise<void>
-  /** POST 成功後（關閉視窗後）交給父層背景上傳圖片 */
   onPostCreated?: (payload: {
     id: string
     title: string
@@ -61,7 +54,6 @@ export function InstagramAddPostDialog({
   const clientScope = isInstagramClientScope(scope)
 
   const [open, setOpen] = React.useState(false)
-  const [surfaceTab, setSurfaceTab] = React.useState<SurfaceTab>("post")
   const [localTitle, setLocalTitle] = React.useState("")
   const [localCaption, setLocalCaption] = React.useState("")
   const [pending, setPending] = React.useState(false)
@@ -85,7 +77,6 @@ export function InstagramAddPostDialog({
   }, [mediaSlots.length])
 
   const reset = React.useCallback(() => {
-    setSurfaceTab("post")
     setLocalTitle("")
     setLocalCaption("")
     setError(null)
@@ -120,7 +111,7 @@ export function InstagramAddPostDialog({
     if (!source || source.length === 0) return
     const files = Array.from(source).filter((f) => f.type.startsWith("image/"))
     if (!files.length) {
-      setError("請拖放或選擇圖片檔（image/*）。")
+      setError("目前僅支援圖片，請選擇 JPEG／PNG／WebP 等圖檔。")
       return
     }
     const room = PLANNER_UPLOAD_MAX_FILES - mediaSlots.length
@@ -165,20 +156,12 @@ export function InstagramAddPostDialog({
     appendImageFiles(e.dataTransfer.files)
   }
 
-  function insertCaptionSnippet(snippet: string) {
-    setLocalCaption((c) => (c ? `${c}${snippet}` : snippet))
-  }
-
   async function submit() {
     if (busy || !canCompose || !clientLabelForApi) return
 
     const trimmedTitle = localTitle.trim()
     if (!trimmedTitle) {
       setError("請填寫標題。")
-      return
-    }
-    if (surfaceTab !== "post") {
-      setError("目前僅開放「貼文」格式，Story／Reels 即將推出。")
       return
     }
 
@@ -189,7 +172,7 @@ export function InstagramAddPostDialog({
       caption: localCaption.trim(),
       plannedPublishDate: null as string | null,
       platform: "instagram" as const,
-      contentType: surfaceTabToContentType(surfaceTab),
+      contentType: "feed" as const,
       status: "published" as const,
       client: clientLabelForApi,
       localNotes: null as string | null,
@@ -234,6 +217,13 @@ export function InstagramAddPostDialog({
     }
   }
 
+  const helperLines = [
+    "目前僅支援圖片上傳，不支援影片。",
+    `每則最多 ${PLANNER_UPLOAD_MAX_FILES} 張；單檔須 ≤ ${MAX_ORIGINAL_MB}MB（壓縮前）。上傳前會將長邊縮至約 ${PLANNER_UPLOAD_MAX_EDGE}px、轉成 JPEG（壓縮後單檔約 ≤ ${MAX_OUTPUT_MB}MB）。`,
+    "預覽牆為 4:5（概念上接近 1080×1350）。",
+    "按下「新增貼文」後會先建立項目並關閉視窗，圖片在背景上傳；預覽牆會先出現佔位，完成後自動更新縮圖。",
+  ]
+
   return (
     <>
       <Button
@@ -265,238 +255,186 @@ export function InstagramAddPostDialog({
       >
         <DialogContent
           className={cn(
-            "flex max-h-[min(92vh,720px)] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl",
+            "flex max-h-[min(90dvh,800px)] w-[min(100vw-1rem,896px)] max-w-[min(100vw-1rem,896px)] flex-col gap-0 p-0 sm:max-w-4xl",
           )}
           showCloseButton={!pending}
           aria-busy={busy}
         >
-          <DialogHeader className="border-border/50 space-y-1 border-b px-4 py-3 text-left">
-            <DialogTitle className="text-base">撰寫貼文</DialogTitle>
-            <DialogDescription className="text-xs">
-              新增至預覽牆；圖片於送出後在背景上傳。
-            </DialogDescription>
+          <DialogHeader className="border-border/50 shrink-0 space-y-2 border-b px-4 py-3 text-left sm:px-5">
+            <DialogTitle className="text-base">新增貼文</DialogTitle>
+            <ul className="text-muted-foreground list-inside list-disc space-y-1 text-[11px] leading-relaxed sm:text-xs">
+              {helperLines.map((line, i) => (
+                <li key={i} className="marker:text-muted-foreground/80">
+                  {line}
+                </li>
+              ))}
+            </ul>
           </DialogHeader>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 md:grid-cols-2">
-            <div className="border-border/50 flex flex-col gap-2 border-b p-4 md:border-b-0 md:border-r">
-              <Label className="text-muted-foreground text-xs">媒體</Label>
-              <div
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <div className="grid grid-cols-1 gap-0 md:grid-cols-2 md:items-start">
+              <div className="border-border/50 flex flex-col gap-2 border-b p-4 sm:p-5 md:min-h-0 md:border-b-0 md:border-r">
+                <Label className="text-muted-foreground text-xs">圖片</Label>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault()
+                      fileInputRef.current?.click()
+                    }
+                  }}
+                  onDragEnter={(e) => {
                     e.preventDefault()
-                    fileInputRef.current?.click()
-                  }
-                }}
-                onDragEnter={(e) => {
-                  e.preventDefault()
-                  setDragActive(true)
-                }}
-                onDragLeave={() => setDragActive(false)}
-                onDragOver={(e) => {
-                  e.preventDefault()
-                  setDragActive(true)
-                }}
-                onDrop={onDropMedia}
-                className={cn(
-                  "bg-muted/30 relative flex min-h-[200px] flex-1 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-4 transition-colors outline-none",
-                  dragActive
-                    ? "border-primary bg-primary/5"
-                    : "border-border/70 hover:border-border",
-                  "focus-visible:ring-ring focus-visible:ring-2",
-                )}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="sr-only"
-                  disabled={busy}
-                  onChange={(e) => {
-                    appendImageFiles(e.target.files)
-                    e.target.value = ""
+                    setDragActive(true)
                   }}
-                />
-                {mediaSlots.length > 0 ? (
-                  <div className="flex w-full flex-col gap-2">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={mediaSlots[selectedMediaIndex]?.previewUrl ?? ""}
-                      alt=""
-                      className="max-h-[min(50vh,360px)] w-full rounded-lg object-contain"
-                    />
-                    <div className="flex flex-wrap gap-1.5">
-                      {mediaSlots.map((slot, idx) => (
-                        <div key={`${slot.previewUrl}-${idx}`} className="relative">
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setSelectedMediaIndex(idx)
-                            }}
-                            className={cn(
-                              "ring-offset-background size-14 overflow-hidden rounded-md border-2 bg-black/20",
-                              selectedMediaIndex === idx
-                                ? "border-primary"
-                                : "border-transparent",
-                            )}
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={slot.previewUrl}
-                              alt=""
-                              className="size-full object-cover"
-                            />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busy}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              removeMediaAt(idx)
-                            }}
-                            className="bg-background/90 text-destructive absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full border text-[10px] shadow"
-                            aria-label="移除此圖"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-muted-foreground text-center text-[11px]">
-                      送出後會在背景依序上傳至 Storage（無須等待此視窗）。
-                    </p>
-                  </div>
-                ) : (
-                  <>
-                    <Upload className="text-muted-foreground size-10" aria-hidden />
-                    <p className="text-muted-foreground text-center text-sm">
-                      拖放一張或多張圖片，或點擊上傳
-                    </p>
-                    <p className="text-muted-foreground text-center text-[11px]">
-                      送出後圖片於背景上傳；長邊約 {PLANNER_UPLOAD_MAX_EDGE}px 壓縮，最多{" "}
-                      {PLANNER_UPLOAD_MAX_FILES} 張。
-                    </p>
-                  </>
-                )}
-              </div>
-              {mediaSlots.length > 0 ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="gap-1"
-                  disabled={busy}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setMediaSlots((prev) => {
-                      for (const s of prev) URL.revokeObjectURL(s.previewUrl)
-                      return []
-                    })
+                  onDragLeave={() => setDragActive(false)}
+                  onDragOver={(e) => {
+                    e.preventDefault()
+                    setDragActive(true)
                   }}
+                  onDrop={onDropMedia}
+                  className={cn(
+                    "bg-muted/30 relative flex min-h-[180px] cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-4 transition-colors outline-none md:min-h-[220px]",
+                    dragActive
+                      ? "border-primary bg-primary/5"
+                      : "border-border/70 hover:border-border",
+                    "focus-visible:ring-ring focus-visible:ring-2",
+                  )}
+                  onClick={() => fileInputRef.current?.click()}
                 >
-                  <Trash2 className="size-3.5" aria-hidden />
-                  移除全部圖片
-                </Button>
-              ) : null}
-            </div>
-
-            <div className="flex min-h-0 flex-col gap-3 overflow-y-auto p-4">
-              <div
-                role="tablist"
-                aria-label="貼文格式"
-                className="bg-muted/40 inline-flex rounded-full border border-border/60 p-0.5"
-              >
-                {(
-                  [
-                    { id: "post" as const, label: "貼文 Post", disabled: false },
-                    { id: "story" as const, label: "限動 Story", disabled: true },
-                    { id: "reels" as const, label: "Reels", disabled: true },
-                  ] as const
-                ).map((t) => (
-                  <button
-                    key={t.id}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/svg+xml"
+                    multiple
+                    className="sr-only"
+                    disabled={busy}
+                    onChange={(e) => {
+                      appendImageFiles(e.target.files)
+                      e.target.value = ""
+                    }}
+                  />
+                  {mediaSlots.length > 0 ? (
+                    <div className="flex w-full flex-col gap-2">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={mediaSlots[selectedMediaIndex]?.previewUrl ?? ""}
+                        alt=""
+                        className="max-h-[min(40vh,320px)] w-full rounded-lg object-contain"
+                      />
+                      <div className="flex flex-wrap gap-1.5">
+                        {mediaSlots.map((slot, idx) => (
+                          <div key={`${slot.previewUrl}-${idx}`} className="relative">
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedMediaIndex(idx)
+                              }}
+                              className={cn(
+                                "ring-offset-background size-14 overflow-hidden rounded-md border-2 bg-black/20",
+                                selectedMediaIndex === idx
+                                  ? "border-primary"
+                                  : "border-transparent",
+                              )}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={slot.previewUrl}
+                                alt=""
+                                className="size-full object-cover"
+                              />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                removeMediaAt(idx)
+                              }}
+                              className="bg-background/90 text-destructive absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full border text-[10px] shadow"
+                              aria-label="移除此圖"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <Upload className="text-muted-foreground size-10" aria-hidden />
+                      <p className="text-muted-foreground text-center text-sm">
+                        拖放或點擊選擇圖片
+                      </p>
+                    </>
+                  )}
+                </div>
+                {mediaSlots.length > 0 ? (
+                  <Button
                     type="button"
-                    role="tab"
-                    aria-selected={surfaceTab === t.id}
-                    disabled={busy || t.disabled}
-                    onClick={() => setSurfaceTab(t.id)}
-                    className={cn(
-                      "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
-                      surfaceTab === t.id
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "text-muted-foreground hover:text-foreground",
-                      t.disabled && "cursor-not-allowed opacity-50",
-                    )}
+                    variant="outline"
+                    size="sm"
+                    className="gap-1"
+                    disabled={busy}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setMediaSlots((prev) => {
+                        for (const s of prev) URL.revokeObjectURL(s.previewUrl)
+                        return []
+                      })
+                    }}
                   >
-                    {t.label}
-                  </button>
-                ))}
+                    <Trash2 className="size-3.5" aria-hidden />
+                    移除全部圖片
+                  </Button>
+                ) : null}
               </div>
 
-              <div className="space-y-1">
-                <Label htmlFor="ig-compose-title" className="text-xs">
-                  標題
-                </Label>
-                <Input
-                  id="ig-compose-title"
-                  value={localTitle}
-                  onChange={(e) => setLocalTitle(e.target.value)}
-                  placeholder="內部標題（必填）"
-                  disabled={busy}
-                  className="h-9"
-                />
-              </div>
+              <div className="flex flex-col gap-3 p-4 sm:p-5">
+                <p className="text-muted-foreground text-xs font-medium">貼文 Post</p>
+                <div className="space-y-1">
+                  <Label htmlFor="ig-compose-title" className="text-xs">
+                    標題
+                  </Label>
+                  <Input
+                    id="ig-compose-title"
+                    value={localTitle}
+                    onChange={(e) => setLocalTitle(e.target.value)}
+                    placeholder="必填"
+                    disabled={busy}
+                    className="h-9"
+                  />
+                </div>
 
-              <div className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
+                <div className="space-y-1">
                   <Label htmlFor="ig-compose-caption" className="text-xs">
                     文案
                   </Label>
-                  <div className="flex flex-wrap gap-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="text-muted-foreground h-7 gap-1 px-2 text-[11px]"
-                      disabled={busy}
-                      onClick={() => insertCaptionSnippet(" #")}
-                    >
-                      <Sparkles className="size-3" aria-hidden />
-                      # 標籤
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="text-muted-foreground h-7 px-2 text-[11px]"
-                      disabled={busy}
-                      onClick={() => insertCaptionSnippet("\n\n")}
-                    >
-                      段落
-                    </Button>
-                  </div>
+                  <Textarea
+                    id="ig-compose-caption"
+                    value={localCaption}
+                    onChange={(e) => setLocalCaption(e.target.value)}
+                    placeholder="選填"
+                    disabled={busy}
+                    rows={5}
+                    className="min-h-[120px] resize-y text-sm"
+                  />
                 </div>
-                <Textarea
-                  id="ig-compose-caption"
-                  value={localCaption}
-                  onChange={(e) => setLocalCaption(e.target.value)}
-                  placeholder="寫點什麼…"
-                  disabled={busy}
-                  rows={6}
-                  className="min-h-[140px] resize-y text-sm"
-                />
-              </div>
 
-              {error ? <p className="text-destructive text-xs">{error}</p> : null}
+                {error ? <p className="text-destructive text-xs">{error}</p> : null}
+              </div>
             </div>
           </div>
 
-          <DialogFooter className="border-border/50 bg-muted/15 gap-2 border-t px-4 py-3 sm:justify-end">
+          <DialogFooter
+            className={cn(
+              "border-border/50 bg-muted/15 shrink-0 gap-2 border-t px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:flex-row sm:justify-end sm:px-5",
+              "!mx-0 !mb-0 rounded-b-xl",
+            )}
+          >
             <Button
               type="button"
               variant="outline"
