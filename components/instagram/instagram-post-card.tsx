@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ImageIcon } from "lucide-react"
+import { GripVertical, ImageIcon } from "lucide-react"
 
 import type { ContentItem } from "@/lib/types/dashboard"
 import {
@@ -61,7 +61,6 @@ export function InstagramPostCard({
   onDrop,
   isDropTarget,
   isDragSource,
-  interactionMode = "view",
   className,
 }: {
   item: ContentItem
@@ -75,11 +74,11 @@ export function InstagramPostCard({
   isDropTarget?: boolean
   /** 拖曳中：來源格視覺變淡 */
   isDragSource?: boolean
-  interactionMode?: "view" | "reorder"
   className?: string
 }) {
   const display = getInstagramDisplayStatus(item)
   const thumb = getInstagramPrimaryImageUrl(item)
+  const caption = (item.caption ?? "").trim()
   const corner =
     scheduleLabel ??
     (display === "scheduled" || item.plannedPublishDate || item.scheduledAt
@@ -91,14 +90,12 @@ export function InstagramPostCard({
       className={cn(
         "group relative w-full min-w-0 overflow-hidden",
         WALL_ASPECT,
-        "bg-[#0a0a0a]",
-        interactionMode === "reorder" && draggable && "cursor-grab active:cursor-grabbing",
-        isDropTarget && "ring-primary z-[2] ring-2 ring-inset",
-        isDragSource && "z-[3] scale-[0.97] opacity-[0.45] shadow-xl transition duration-150",
+        "bg-[#0a0a0a] ring-1 ring-white/5 transition-all duration-160 ease-out",
+        "hover:-translate-y-[1px] hover:scale-[1.012] hover:shadow-[0_12px_28px_rgba(0,0,0,0.28)] hover:ring-white/15",
+        isDropTarget && "ring-primary/90 z-[2] ring-2 ring-inset",
+        isDragSource && "z-[3] scale-[0.985] opacity-[0.5] shadow-[0_16px_36px_rgba(0,0,0,0.32)]",
         className,
       )}
-      draggable={Boolean(draggable && interactionMode === "reorder")}
-      onDragStart={draggable && interactionMode === "reorder" ? onDragStart : undefined}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
@@ -124,6 +121,21 @@ export function InstagramPostCard({
         </div>
       ) : null}
 
+      {caption ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[3] opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100">
+          <div className="bg-gradient-to-t from-black/78 via-black/55 to-transparent px-2 pb-1.5 pt-5">
+            <p
+              className={cn(
+                "text-[10px] leading-[1.35] tracking-[0.01em] text-white/88",
+                "[display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden",
+              )}
+            >
+              {caption}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       {/* 主要點擊區：不可 draggable，避免與 HTML5 drag 搶奪點擊導致無法開詳情 */}
       <button
         type="button"
@@ -131,11 +143,36 @@ export function InstagramPostCard({
         className={cn(
           "absolute inset-0 z-[5] border-0 bg-transparent p-0 outline-none",
           "cursor-pointer",
-          interactionMode === "reorder" && "pointer-events-none",
           "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-inset",
         )}
         aria-label={`開啟「${item.title}」詳情（${instagramDisplayStatusLabel[display]}）`}
       />
+
+      {draggable ? (
+        <button
+          type="button"
+          draggable
+          onDragStart={(e) => {
+            e.stopPropagation()
+            onDragStart?.(e)
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          className={cn(
+            "absolute right-1 top-1 z-[8] hidden size-6 items-center justify-center rounded-md border",
+            "border-white/15 bg-black/40 text-white/78 backdrop-blur-[2px]",
+            "cursor-grab active:cursor-grabbing",
+            "opacity-0 transition-opacity duration-150 ease-out md:flex md:group-hover:opacity-100 md:focus-visible:opacity-100",
+            "max-md:flex max-md:opacity-100",
+            "hover:border-white/30 hover:text-white",
+            "focus-visible:ring-ring/70 outline-none focus-visible:ring-2",
+          )}
+          aria-label="拖曳排序"
+          title="拖曳排序"
+        >
+          <GripVertical className="size-3.5" aria-hidden />
+        </button>
+      ) : null}
     </div>
   )
 }
