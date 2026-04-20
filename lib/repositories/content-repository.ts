@@ -137,7 +137,11 @@ export async function listDashboardContentItems(): Promise<ContentItem[]> {
       )
     `,
     )
-    .order("instagram_order", { ascending: true, nullsFirst: false })
+    /**
+     * 勿使用 `.order("instagram_order")`：若 DB 尚未執行
+     * `supabase/migrations/0003_content_items_instagram_order.sql`，PostgREST 會回錯並導致整頁 500。
+     * Instagram 牆面順序於 `InstagramManager` 內以 `sortInstagramWallItems` 處理。
+     */
     .order("updated_at", { ascending: false })
   if (error) throw new Error(`讀取 content_items 失敗：${error.message}`)
 

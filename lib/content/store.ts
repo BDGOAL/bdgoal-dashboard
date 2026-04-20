@@ -110,6 +110,19 @@ function isInstagramPlatformDb(platform: string): boolean {
   return v === "instagram" || v === "ig"
 }
 
+function isLikelyMissingInstagramOrderColumn(
+  err: { message?: string; code?: string } | null | undefined,
+): boolean {
+  const m = (err?.message ?? "").toLowerCase()
+  return (
+    m.includes("instagram_order") &&
+    (m.includes("does not exist") ||
+      m.includes("unknown") ||
+      m.includes("column") ||
+      err?.code === "42703")
+  )
+}
+
 /** 同一客戶底下所有 Instagram／ig 列之最大 `instagram_order` + 1（無則 0） */
 async function nextInstagramWallOrder(
   supabase: SupabaseClient,
@@ -119,7 +132,16 @@ async function nextInstagramWallOrder(
     .from("content_items")
     .select("instagram_order, platform")
     .eq("client_id", clientId)
-  if (error) throw new Error(`讀取排序失敗：${error.message}`)
+  if (error) {
+    if (isLikelyMissingInstagramOrderColumn(error)) {
+      console.warn(
+        "[content/store] instagram_order 欄位可能尚未 migration，略過讀取排序：",
+        error.message,
+      )
+      return 0
+    }
+    throw new Error(`讀取排序失敗：${error.message}`)
+  }
   const nums = (data ?? [])
     .filter((r) => isInstagramPlatformDb(r.platform))
     .map((r) => r.instagram_order)
@@ -372,12 +394,27 @@ export async function upsertStoredContentItem(
   if (item.instagramOrder !== undefined) {
     payload.instagram_order = item.instagramOrder
   }
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("content_items")
     .upsert(payload)
     .select("*")
     .single()
+  if (error && isLikelyMissingInstagramOrderColumn(error) && "instagram_order" in payload) {
+    console.warn(
+      "[content/store] upsert：略過 instagram_order（欄位可能尚未 migration）：",
+      error.message,
+    )
+    const { instagram_order: _io, ...withoutOrder } = payload
+    const second = await supabase
+      .from("content_items")
+      .upsert(withoutOrder)
+      .select("*")
+      .single()
+    data = second.data
+    error = second.error
+  }
   if (error) throw new Error(`儲存內容失敗：${error.message}`)
+  if (!data) throw new Error("儲存內容失敗：無回傳資料。")
   return {
     ...item,
     id: data.id,
