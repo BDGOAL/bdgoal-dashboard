@@ -5,9 +5,7 @@ import { ImageIcon } from "lucide-react"
 
 import { InstagramPostCard } from "@/components/instagram/instagram-post-card"
 import { EmptyState } from "@/components/dashboard/empty-state"
-import type { WorkspaceScope } from "@/lib/types/agency"
 import type { ContentItem } from "@/lib/types/dashboard"
-import { resolveClientForInstagramGrid } from "@/lib/scope/resolve-client-for-grid"
 import { persistInstagramGridOrderPlaceholder } from "@/lib/instagram/instagram-ui-persistence"
 import { cn } from "@/lib/utils"
 
@@ -35,27 +33,17 @@ export function getGridImageUrl(item: ContentItem): string | null {
 
 export function InstagramGridView({
   items,
-  scope,
+  clientDisplayName,
   onRequestDetails,
   onGridOrderChange,
 }: {
+  /** 已由 {@link InstagramManager} 篩選：單一客戶 + Instagram */
   items: ContentItem[]
-  scope: WorkspaceScope
+  clientDisplayName: string
   onRequestDetails: (item: ContentItem) => void
-  /** Fired after non-published tiles are reordered (published items excluded). */
   onGridOrderChange?: (reorderedDraggableItems: ContentItem[]) => void
 }) {
-  const selectedClient = React.useMemo(
-    () => resolveClientForInstagramGrid(scope, items),
-    [scope, items],
-  )
-
-  const scopedRows = React.useMemo(() => {
-    if (!selectedClient) return []
-    return items.filter(
-      (i) => i.clientId === selectedClient.id && i.platform === "instagram",
-    )
-  }, [items, selectedClient])
+  const scopedRows = items
 
   const { published, draggable } = React.useMemo(() => {
     const pub = scopedRows.filter((i) => i.status === "published")
@@ -148,36 +136,23 @@ export function InstagramGridView({
     setDropTargetId(null)
   }
 
-  if (!selectedClient) {
-    return (
-      <EmptyState
-        icon={ImageIcon}
-        title="請先選擇客戶以檢視 Instagram Grid"
-        reason="Grid 僅支援單一客戶檢視，模擬該帳號的貼文牆。"
-        suggestion="請在頁面上方「範圍」選擇一個客戶。"
-      />
-    )
-  }
-
   if (displayRows.length === 0) {
     return (
       <EmptyState
         icon={ImageIcon}
-        title="此客戶目前沒有可顯示的 Instagram 貼文"
-        reason="可能尚未匯入／建立內容。"
-        suggestion="匯入 Ready Queue，或手動新增貼文。"
+        title={`為「${clientDisplayName}」建立第一則 Instagram 貼文`}
+        reason="此客戶目前沒有任何 Instagram 內容。"
+        suggestion="點「新增貼文」撰寫內容，或從 Asana Ready Queue 匯入。"
       />
     )
   }
 
   return (
-    <div
-      className="flex flex-col gap-3"
-      onDragEnd={clearDragState}
-    >
+    <div className="flex flex-col gap-3" onDragEnd={clearDragState}>
       <p className="text-muted-foreground text-xs">
-        客戶：
-        <span className="text-foreground font-medium">{selectedClient.name}</span>
+        顯示範圍：
+        <span className="text-foreground font-medium">{clientDisplayName}</span>
+        <span className="text-muted-foreground"> · Instagram</span>
       </p>
       <div
         className={cn(

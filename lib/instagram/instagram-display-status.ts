@@ -1,5 +1,8 @@
 import type { ContentItem } from "@/lib/types/dashboard"
 
+/** Stored in `localNotes` for manual items that should show as「待審核」— no schema change. */
+export const INSTAGRAM_NEEDS_APPROVAL_LOCAL_MARKER = "bdgoal:needs-approval"
+
 /** User-facing pipeline labels for Instagram planner UI */
 export type InstagramDisplayStatus =
   | "draft"
@@ -11,6 +14,12 @@ export function getInstagramDisplayStatus(item: ContentItem): InstagramDisplaySt
   if (item.status === "published") return "published"
   if (item.status === "scheduled") return "scheduled"
   if (item.status === "idea") return "needsApproval"
+  if (
+    item.localNotes?.includes(INSTAGRAM_NEEDS_APPROVAL_LOCAL_MARKER) &&
+    item.status === "draft"
+  ) {
+    return "needsApproval"
+  }
   return "draft"
 }
 

@@ -11,7 +11,6 @@ import {
 
 import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/dashboard/empty-state"
-import type { WorkspaceScope } from "@/lib/types/agency"
 import type { ContentItem } from "@/lib/types/dashboard"
 import {
   buildOccurrences,
@@ -29,7 +28,6 @@ import {
   getInstagramPrimaryImageUrl,
   truncateInstagramCaption,
 } from "@/lib/instagram/instagram-media"
-import { resolveClientForInstagramGrid } from "@/lib/scope/resolve-client-for-grid"
 import { applyScheduledAtChangeRule, toPlannedPublishDateIso } from "@/components/instagram/status-schedule-rules"
 import { cn } from "@/lib/utils"
 
@@ -183,21 +181,16 @@ function CalendarChip({
 
 export function InstagramCalendarView({
   items,
-  scope,
+  clientDisplayName,
   onRescheduleItem,
   onRequestDetails,
 }: {
+  /** 已由 {@link InstagramManager} 篩選：單一客戶 + Instagram */
   items: ContentItem[]
-  scope: WorkspaceScope
+  clientDisplayName: string
   onRescheduleItem: (prev: ContentItem, next: ContentItem) => void
   onRequestDetails: (item: ContentItem) => void
 }) {
-
-  const selectedClient = React.useMemo(
-    () => resolveClientForInstagramGrid(scope, items),
-    [scope, items],
-  )
-
   const [view, setView] = React.useState(() => {
     const n = new Date()
     return { year: n.getFullYear(), month: n.getMonth() }
@@ -206,12 +199,7 @@ export function InstagramCalendarView({
   const [dragId, setDragId] = React.useState<string | null>(null)
   const [overKey, setOverKey] = React.useState<string | null>(null)
 
-  const baseItems = React.useMemo(() => {
-    if (!selectedClient) return []
-    return items.filter(
-      (i) => i.clientId === selectedClient.id && i.platform === "instagram",
-    )
-  }, [items, selectedClient])
+  const baseItems = items
 
   const occurrences = React.useMemo(
     () => buildOccurrences(baseItems),
@@ -268,17 +256,6 @@ export function InstagramCalendarView({
     setView({ year: n.getFullYear(), month: n.getMonth() })
   }
 
-  if (!selectedClient) {
-    return (
-      <EmptyState
-        icon={CalendarDays}
-        title="請先選擇客戶以檢視行事曆"
-        reason="Instagram 行事曆與 Grid 相同，採單一客戶檢視。"
-        suggestion="請在頂端範圍選擇一個客戶。"
-      />
-    )
-  }
-
   function onDragStartItem(item: ContentItem) {
     return (e: React.DragEvent) => {
       if (item.status === "published") return
@@ -293,12 +270,24 @@ export function InstagramCalendarView({
     setOverKey(null)
   }
 
+  if (baseItems.length === 0) {
+    return (
+      <EmptyState
+        icon={CalendarDays}
+        title={`為「${clientDisplayName}」建立第一則 Instagram 貼文`}
+        reason="此客戶目前沒有任何可顯示在行事曆上的內容。"
+        suggestion="新增貼文並設定排程，或從 Asana 匯入。"
+      />
+    )
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-muted-foreground text-xs">
-          客戶：
-          <span className="text-foreground font-medium">{selectedClient.name}</span>
+          顯示範圍：
+          <span className="text-foreground font-medium">{clientDisplayName}</span>
+          <span className="text-muted-foreground"> · Instagram</span>
         </p>
         <div className="flex flex-wrap items-center gap-1">
           <Button
