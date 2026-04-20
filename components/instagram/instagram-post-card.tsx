@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { GripVertical, ImageIcon } from "lucide-react"
+import { ImageIcon } from "lucide-react"
 
 import type { ContentItem } from "@/lib/types/dashboard"
 import {
@@ -12,8 +12,8 @@ import {
 import { getInstagramPrimaryImageUrl } from "@/lib/instagram/instagram-media"
 import { cn } from "@/lib/utils"
 
-/** IG 貼文牆 4:5（常見輸出 1080×1350），`object-cover` 填滿畫框 */
-const WALL_ASPECT = "aspect-[4/5]"
+/** 規劃牆使用較緊湊 5:6 預覽；實際 IG 發佈仍以 4:5（1080×1350）為基準。 */
+const WALL_ASPECT = "aspect-[5/6]"
 
 function formatScheduleCorner(value: string | null | undefined): string {
   if (!value) return ""
@@ -61,6 +61,7 @@ export function InstagramPostCard({
   onDrop,
   isDropTarget,
   isDragSource,
+  interactionMode = "view",
   className,
 }: {
   item: ContentItem
@@ -74,6 +75,7 @@ export function InstagramPostCard({
   isDropTarget?: boolean
   /** 拖曳中：來源格視覺變淡 */
   isDragSource?: boolean
+  interactionMode?: "view" | "reorder"
   className?: string
 }) {
   const display = getInstagramDisplayStatus(item)
@@ -90,10 +92,13 @@ export function InstagramPostCard({
         "group relative w-full min-w-0 overflow-hidden",
         WALL_ASPECT,
         "bg-[#0a0a0a]",
-        isDropTarget && "ring-primary/90 z-[1] ring-2 ring-inset",
-        isDragSource && "opacity-[0.42] transition-opacity duration-150",
+        interactionMode === "reorder" && draggable && "cursor-grab active:cursor-grabbing",
+        isDropTarget && "ring-primary z-[2] ring-2 ring-inset",
+        isDragSource && "z-[3] scale-[0.97] opacity-[0.45] shadow-xl transition duration-150",
         className,
       )}
+      draggable={Boolean(draggable && interactionMode === "reorder")}
+      onDragStart={draggable && interactionMode === "reorder" ? onDragStart : undefined}
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
@@ -126,37 +131,11 @@ export function InstagramPostCard({
         className={cn(
           "absolute inset-0 z-[5] border-0 bg-transparent p-0 outline-none",
           "cursor-pointer",
+          interactionMode === "reorder" && "pointer-events-none",
           "focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-inset",
         )}
         aria-label={`開啟「${item.title}」詳情（${instagramDisplayStatusLabel[display]}）`}
       />
-
-      {draggable ? (
-        <div
-          draggable
-          onDragStart={(e) => {
-            e.stopPropagation()
-            onDragStart?.(e)
-          }}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-          className={cn(
-            "absolute right-0 top-0 z-10 flex cursor-grab items-center justify-center p-1.5 text-white/90",
-            "active:cursor-grabbing",
-            "hover:bg-black/35",
-            "focus-visible:ring-ring rounded-bl-md outline-none focus-visible:ring-2",
-          )}
-          role="button"
-          tabIndex={0}
-          aria-label="按住拖曳以調整動態順序"
-          title="拖曳排序"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") e.preventDefault()
-          }}
-        >
-          <GripVertical className="size-4 drop-shadow-md" aria-hidden />
-        </div>
-      ) : null}
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { InstagramPostCard } from "@/components/instagram/instagram-post-card"
 import { EmptyState } from "@/components/dashboard/empty-state"
 import type { ContentItem } from "@/lib/types/dashboard"
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 
 /** @deprecated Use {@link getInstagramPrimaryImageUrl} from `@/lib/instagram/instagram-media` */
 export function getGridImageUrl(item: ContentItem): string | null {
@@ -32,7 +33,7 @@ export function moveIdInList(ids: string[], src: string, target: string): string
  */
 const wallGridClass = cn(
   "grid w-full max-w-full min-w-0 grid-cols-3",
-  "gap-0.5 sm:gap-1",
+  "gap-0.5",
 )
 
 export function InstagramGridView({
@@ -58,6 +59,7 @@ export function InstagramGridView({
 
   const [dragSourceId, setDragSourceId] = React.useState<string | null>(null)
   const [dropTargetId, setDropTargetId] = React.useState<string | null>(null)
+  const [reorderMode, setReorderMode] = React.useState(false)
 
   const previewIds = React.useMemo(() => {
     if (!dragSourceId || !dropTargetId || dragSourceId === dropTargetId) {
@@ -129,12 +131,13 @@ export function InstagramGridView({
 
   function renderCard(item: ContentItem) {
     const isPublished = item.status === "published"
-    const canDrag = !isPublished
+    const canDrag = reorderMode && !isPublished
     return (
       <InstagramPostCard
         key={item.id}
         item={item}
         draggable={canDrag}
+        interactionMode={reorderMode ? "reorder" : "view"}
         onOpen={() => onRequestDetails(item)}
         onDragStart={canDrag ? onDragStartFrom(item.id) : undefined}
         onDragOver={onDragOverTile(item.id)}
@@ -151,7 +154,23 @@ export function InstagramGridView({
 
   return (
     <div className="flex min-w-0 max-w-full flex-col gap-2" onDragEnd={clearDragState}>
-      <div className={wallGridClass}>{displayItems.map((item) => renderCard(item))}</div>
+      <div className="flex items-center justify-end">
+        <Button
+          type="button"
+          size="sm"
+          variant={reorderMode ? "default" : "outline"}
+          className="h-8 px-2 text-xs"
+          onClick={() => {
+            clearDragState()
+            setReorderMode((v) => !v)
+          }}
+        >
+          {reorderMode ? "完成排序" : "調整排序"}
+        </Button>
+      </div>
+      <div className="mx-auto w-full max-w-[520px]">
+        <div className={wallGridClass}>{displayItems.map((item) => renderCard(item))}</div>
+      </div>
     </div>
   )
 }
