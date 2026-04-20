@@ -181,7 +181,16 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
           if (pendingIds && pendingIds.length === sorted.length) {
             const sortedIdSet = new Set(sorted.map((r) => r.id))
             const allMatch = pendingIds.every((id) => sortedIdSet.has(id))
-            setRows(allMatch ? applyInstagramOrderLocally(sorted, pendingIds) : sorted)
+            const merged = allMatch ? applyInstagramOrderLocally(sorted, pendingIds) : sorted
+            if (allMatch) {
+              const persistedIds = sortInstagramWallItems(sorted).map((r) => r.id)
+              const pendingKey = pendingIds.join("|")
+              const persistedKey = persistedIds.join("|")
+              if (pendingKey === persistedKey) {
+                pendingOrderIdsRef.current = null
+              }
+            }
+            setRows(merged)
           } else {
             setRows(sorted)
           }

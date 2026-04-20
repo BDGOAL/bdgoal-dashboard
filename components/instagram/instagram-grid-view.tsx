@@ -109,7 +109,7 @@ export function InstagramGridView({
   }
 
   function SortableCard({ item }: { item: ContentItem }) {
-    const canDrag = !selectionMode && item.status !== "published"
+    const canDrag = !selectionMode && item.source === "manual"
     const sortable = useSortable({
       id: item.id,
       data: { canDrag },

@@ -2,6 +2,7 @@ import { sortInstagramWallItems } from "@/lib/instagram/instagram-wall-sort"
 import { getPreviewByToken } from "@/lib/repositories/preview-repository"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
 import type { ContentItem } from "@/lib/types/dashboard"
+import { PreviewGridClient } from "./preview-grid-client"
 
 type Row = {
   id: string
@@ -90,28 +91,7 @@ export default async function InstagramPreviewPage({
             此預覽目前沒有可顯示的 Instagram 內容。
           </div>
         ) : (
-          <section className="mx-auto w-full max-w-[520px]">
-            <div className="grid grid-cols-3 gap-0.5">
-              {mapped.map((item) => (
-                <article
-                  key={item.id}
-                  className="group relative aspect-[5/6] overflow-hidden rounded-sm bg-[#0a0a0a] ring-1 ring-white/8"
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={item.attachments?.[0]?.url ?? item.thumbnail ?? ""}
-                    alt=""
-                    className="absolute inset-0 size-full object-cover"
-                  />
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/75 via-black/40 to-transparent px-1.5 pb-1 pt-4">
-                    <p className="line-clamp-2 text-[10px] leading-tight text-white/90">
-                      {item.caption || item.title}
-                    </p>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
+          <PreviewGridClient items={mapped} />
         )}
       </div>
     </main>
