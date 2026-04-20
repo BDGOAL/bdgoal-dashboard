@@ -19,6 +19,8 @@ export const FEEDBACK_COPY = {
   addSubmitting: "送出中…",
   /** 新增對話框：onAdded / refresh */
   addSyncing: "同步中…",
+  /** 新增對話框：圖片上傳至 Storage */
+  addUploadingMedia: "上傳圖片中…",
 } as const
 
 type DialogInlineToastProps = {

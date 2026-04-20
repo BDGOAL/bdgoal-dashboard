@@ -2,6 +2,7 @@
 
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { AccountMenu } from "@/components/dashboard/account-menu"
+import { CreateClientDialog } from "@/components/dashboard/create-client-dialog"
 import { ScopeSelector } from "@/components/dashboard/scope-selector"
 import { WorkspaceScopeProvider } from "@/components/dashboard/workspace-scope-context"
 import { Separator } from "@/components/ui/separator"
@@ -24,7 +25,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               BDGoal Dashboard
             </span>
             <AccountMenu />
-            <div className="ml-auto min-w-0 max-w-[min(100%,300px)]">
+            <div className="ml-auto flex min-w-0 max-w-[min(100%,440px)] items-center justify-end gap-2">
+              <CreateClientDialog />
               <ScopeSelector />
             </div>
           </header>

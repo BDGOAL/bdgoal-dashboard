@@ -19,6 +19,26 @@ export function ScopeSelector() {
 
   const [apiClients, setApiClients] = React.useState<ApiClientRow[] | null>(null)
   const [loadFailed, setLoadFailed] = React.useState(false)
+  const [reloadNonce, setReloadNonce] = React.useState(0)
+
+  React.useEffect(() => {
+    function onClientsUpdated(e: Event) {
+      const d = (e as CustomEvent<{ client?: ApiClientRow }>).detail
+      if (d?.client?.id) {
+        setApiClients((prev) => {
+          const base = prev ?? []
+          if (base.some((c) => c.id === d.client!.id)) return prev
+          return [...base, d.client!].sort((a, b) =>
+            a.name.localeCompare(b.name, "zh-Hant"),
+          )
+        })
+        setLoadFailed(false)
+      }
+      setReloadNonce((n) => n + 1)
+    }
+    window.addEventListener("bdgoal:clients-updated", onClientsUpdated)
+    return () => window.removeEventListener("bdgoal:clients-updated", onClientsUpdated)
+  }, [])
 
   React.useEffect(() => {
     let cancelled = false
@@ -47,7 +67,7 @@ export function ScopeSelector() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [reloadNonce])
 
   const loading = apiClients === null
   const clientOptions = React.useMemo(() => apiClients ?? [], [apiClients])

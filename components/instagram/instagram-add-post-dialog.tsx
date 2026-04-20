@@ -126,7 +126,9 @@ export function InstagramAddPostDialog({
   const [displayStatus, setDisplayStatus] =
     React.useState<InstagramDisplayStatus>("draft")
   const [scheduledLocal, setScheduledLocal] = React.useState("")
-  const [pending, setPending] = React.useState<false | "post" | "sync">(false)
+  const [pending, setPending] = React.useState<false | "post" | "upload" | "sync">(false)
+  /** 建立成功但上傳失敗時，僅重試上傳用 */
+  const [retryItemId, setRetryItemId] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [toast, setToast] = React.useState<ToastState>(null)
   const [mediaFile, setMediaFile] = React.useState<File | null>(null)
@@ -153,6 +155,7 @@ export function InstagramAddPostDialog({
     setDisplayStatus("draft")
     setScheduledLocal("")
     setError(null)
+    setRetryItemId(null)
     setMediaFile(null)
     if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl)
     setMediaPreviewUrl(null)
@@ -202,6 +205,46 @@ export function InstagramAddPostDialog({
 
   async function submit(mode: SubmitMode) {
     if (busy || !canCompose || !clientLabelForApi) return
+
+    if (retryItemId) {
+      if (!mediaFile) {
+        setError("請選擇要上傳的圖片後再試，或關閉視窗於列表中稍後補圖。")
+        return
+      }
+      setPending("upload")
+      setError(null)
+      setToast(null)
+      try {
+        const up = await uploadInstagramComposeMedia(retryItemId, mediaFile, {
+          typeLabel: mediaFile.name,
+        })
+        if (!up.ok) {
+          setError(`圖片上傳失敗：${up.error}`)
+          return
+        }
+        setPending("sync")
+        try {
+          await Promise.resolve(onAdded())
+        } catch (syncErr) {
+          const msg =
+            syncErr instanceof Error
+              ? syncErr.message
+              : "無法同步最新資料，請稍後再試。"
+          setError(msg)
+          return
+        }
+        setToast({ message: FEEDBACK_COPY.postAdded })
+        await new Promise((resolve) => setTimeout(resolve, 420))
+        reset()
+        setOpen(false)
+      } catch {
+        setError("上傳失敗，請稍後再試。")
+      } finally {
+        setPending(false)
+      }
+      return
+    }
+
     const trimmedTitle = localTitle.trim()
     if (!trimmedTitle) {
       setError("請填寫標題。")
@@ -216,14 +259,6 @@ export function InstagramAddPostDialog({
     if ("error" in mapped) {
       setError(mapped.error)
       return
-    }
-
-    if (mediaFile) {
-      const uploaded = await uploadInstagramComposeMedia(mediaFile)
-      if (!uploaded) {
-        // TODO: extend POST body with thumbnail / attachments when upload is wired
-        void uploaded
-      }
     }
 
     const createPayload = {
@@ -246,11 +281,44 @@ export function InstagramAddPostDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(createPayload),
       })
-      const json = (await res.json()) as { error?: string }
+      const json = (await res.json()) as {
+        error?: string
+        item?: { id: string }
+      }
       if (!res.ok) {
         setError(json.error ?? "新增失敗。")
         return
       }
+      const newId = json.item?.id?.trim()
+      if (!newId) {
+        setError("建立成功但回應缺少項目 id。")
+        return
+      }
+
+      if (mediaFile) {
+        setPending("upload")
+        const up = await uploadInstagramComposeMedia(newId, mediaFile, {
+          typeLabel: mediaFile.name,
+        })
+        if (!up.ok) {
+          setRetryItemId(newId)
+          setError(
+            `貼文已建立，但圖片上傳失敗：${up.error}。請保留圖片後再按「儲存草稿」僅重試上傳，或關閉視窗稍後補圖。`,
+          )
+          setPending("sync")
+          try {
+            await Promise.resolve(onAdded())
+          } catch (syncErr) {
+            const msg =
+              syncErr instanceof Error
+                ? syncErr.message
+                : "無法同步最新資料，請稍後再試。"
+            setError(msg)
+          }
+          return
+        }
+      }
+
       setPending("sync")
       try {
         await Promise.resolve(onAdded())
@@ -276,9 +344,11 @@ export function InstagramAddPostDialog({
   const primaryPendingLabel =
     pending === "sync"
       ? FEEDBACK_COPY.addSyncing
-      : pending === "post"
-        ? FEEDBACK_COPY.addSubmitting
-        : false
+      : pending === "upload"
+        ? FEEDBACK_COPY.addUploadingMedia
+        : pending === "post"
+          ? FEEDBACK_COPY.addSubmitting
+          : false
 
   return (
     <>
@@ -382,7 +452,7 @@ export function InstagramAddPostDialog({
                       拖放圖片至此，或點擊上傳
                     </p>
                     <p className="text-muted-foreground text-center text-[11px]">
-                      預覽僅在瀏覽器端；正式網址需接上傳流程（見 TODO）。
+                      儲存後會上傳至 Supabase Storage 並建立附件紀錄。
                     </p>
                   </>
                 )}
@@ -535,8 +605,8 @@ export function InstagramAddPostDialog({
 
               {error ? <p className="text-destructive text-xs">{error}</p> : null}
               <p className="text-muted-foreground text-[11px] leading-relaxed">
-                「儲存草稿」會寫入 planning；「排程」需完整日期時間；「發佈」會標記為
-                published。待審核會寫入備註標記，Grid 會顯示琥珀色徽章。
+                流程：先建立內容項目，再上傳圖片。若上傳失敗，貼文仍會保留，可再按「儲存草稿」僅重試上傳。
+                「儲存草稿」為 planning；「排程」須有時間；「發佈」為 published。
               </p>
             </div>
           </div>
