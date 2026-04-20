@@ -67,6 +67,8 @@ export type ContentItem = {
   thumbnail: string | null
   author: string
   attachments?: Array<{
+    /** DB `content_attachments.id` when loaded from Supabase */
+    id?: string
     name: string
     url: string
   }>

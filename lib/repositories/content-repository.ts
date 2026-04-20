@@ -40,12 +40,12 @@ type DbContentItemWithAttachments = DbContentItem & {
 
 function attachmentsFromNestedRow(
   row: DbContentItemWithAttachments,
-): Array<{ name: string; url: string }> {
+): Array<{ id?: string; name: string; url: string }> {
   const raw = row.content_attachments
   if (!raw?.length) return []
   return [...raw]
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-    .map((a) => ({ name: a.type ?? "asset", url: a.url }))
+    .map((a) => ({ id: a.id, name: a.type ?? "asset", url: a.url }))
 }
 
 function normalizePlatform(input: string): ContentPlatform | null {
@@ -82,7 +82,7 @@ function pickScopeIds(clientId: string, platform: ContentPlatform) {
 function mapDbRowToDashboard(
   row: DbContentItem,
   clientNameMap: Record<string, string>,
-  attachments: Array<{ name: string; url: string }>,
+  attachments: Array<{ id?: string; name: string; url: string }>,
 ): ContentItem | null {
   const platform = normalizePlatform(row.platform)
   if (!platform) return null

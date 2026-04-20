@@ -1,11 +1,12 @@
 "use client"
 
 import * as React from "react"
-import { ExternalLink } from "lucide-react"
+import { ExternalLink, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Sheet,
   SheetContent,
@@ -26,13 +27,13 @@ import {
   getInstagramDisplayStatus,
   instagramDisplayStatusLabel,
 } from "@/lib/instagram/instagram-display-status"
-import { getInstagramPrimaryImageUrl } from "@/lib/instagram/instagram-media"
 import { isInstagramPersistableItem } from "@/lib/instagram/instagram-ui-persistence"
 import {
   DialogInlineToast,
   FEEDBACK_COPY,
   PendingButtonLabel,
 } from "@/components/dashboard/async-feedback"
+import { cn } from "@/lib/utils"
 
 function contentItemToWorkflow(item: ContentItem): ContentWorkflowStatus {
   if (item.status === "published") return "published"
@@ -47,6 +48,18 @@ function formatDatetimeLocalValue(iso: string | null | undefined): string {
   } catch {
     return ""
   }
+}
+
+/** 圖庫順序與 `content_attachments.sort_order` 一致；無附件列時僅顯示 thumbnail（不可單張刪除）。 */
+function galleryItemsForItem(item: ContentItem): Array<{ url: string; attachmentId?: string }> {
+  const atts = item.attachments ?? []
+  const withUrl = atts.filter((a) => a.url?.trim())
+  if (withUrl.length) {
+    return withUrl.map((a) => ({ url: a.url!.trim(), attachmentId: a.id }))
+  }
+  const thumb = item.thumbnail?.trim()
+  if (thumb) return [{ url: thumb }]
+  return []
 }
 
 type Props = {
@@ -68,7 +81,9 @@ export function InstagramPostDetailsPanel({
 }: Props) {
   const [workflow, setWorkflow] = React.useState<ContentWorkflowStatus>("planning")
   const [plannedLocal, setPlannedLocal] = React.useState("")
-  const [pending, setPending] = React.useState<false | "save" | "sync">(false)
+  const [captionDraft, setCaptionDraft] = React.useState("")
+  const [galleryIndex, setGalleryIndex] = React.useState(0)
+  const [pending, setPending] = React.useState<false | "save" | "sync" | "delete" | "rmAtt">(false)
   const [error, setError] = React.useState<string | null>(null)
   const [toast, setToast] = React.useState<ToastState>(null)
 
@@ -84,14 +99,18 @@ export function InstagramPostDetailsPanel({
     setPlannedLocal(
       formatDatetimeLocalValue(item.plannedPublishDate ?? item.scheduledAt),
     )
+    setCaptionDraft(item.caption ?? "")
+    setGalleryIndex(0)
     setError(null)
     setToast(null)
   }, [item])
 
-  async function saveWith(
-    wf: ContentWorkflowStatus,
-    planned: string,
-  ) {
+  const galleryItems = item ? galleryItemsForItem(item) : []
+  React.useEffect(() => {
+    setGalleryIndex((i) => Math.min(i, Math.max(0, galleryItems.length - 1)))
+  }, [galleryItems.length, item?.id])
+
+  async function saveWith(wf: ContentWorkflowStatus, planned: string) {
     if (pending || !item) return
     if (!isInstagramPersistableItem(item)) {
       setError("此為示範資料，請使用「完整編輯」查看欄位（無法寫入伺服器）。")
@@ -106,7 +125,16 @@ export function InstagramPostDetailsPanel({
         setError(ruleError)
         return
       }
-      const iso = toPlannedPublishDateIso(planned)
+      const iso =
+        wf === "published"
+          ? null
+          : planned.trim() === ""
+            ? null
+            : toPlannedPublishDateIso(planned)
+      if (wf !== "published" && planned.trim() !== "" && iso === null) {
+        setError("日期與時間格式無效，請修正或留空。")
+        return
+      }
       const res = await fetch("/api/content/items", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -114,6 +142,7 @@ export function InstagramPostDetailsPanel({
           id: item.id,
           status: wf,
           plannedPublishDate: iso,
+          caption: captionDraft,
           expectedUpdatedAt: item.updatedAt,
         }),
       })
@@ -148,6 +177,92 @@ export function InstagramPostDetailsPanel({
     }
   }
 
+  async function deletePost() {
+    if (pending || !item || !isInstagramPersistableItem(item)) return
+    if (item.source !== "manual") return
+    if (!window.confirm("確定刪除此貼文？此動作無法復原。")) return
+    setPending("delete")
+    setError(null)
+    try {
+      const res = await fetch(`/api/content/items/${encodeURIComponent(item.id)}`, {
+        method: "DELETE",
+      })
+      const raw = await res.text()
+      let json = {} as { error?: string }
+      if (raw) {
+        try {
+          json = JSON.parse(raw) as { error?: string }
+        } catch {
+          setError(`刪除失敗（${res.status}）：${raw.slice(0, 160)}`)
+          return
+        }
+      }
+      if (!res.ok) {
+        setError(json.error ?? "刪除失敗。")
+        return
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("bdgoal:content-item-updated", { detail: { id: item.id } }),
+        )
+      }
+      setPending("sync")
+      try {
+        await Promise.resolve(onSaved())
+      } catch (syncErr) {
+        const msg =
+          syncErr instanceof Error
+            ? syncErr.message
+            : "無法同步最新資料，請稍後再試。"
+        setError(msg)
+        return
+      }
+      onOpenChange(false)
+    } catch {
+      setError("刪除失敗，請稍後再試。")
+    } finally {
+      setPending(false)
+    }
+  }
+
+  async function removeAttachment(attachmentId: string) {
+    if (pending || !item || !isInstagramPersistableItem(item)) return
+    if (!window.confirm("從此貼文移除這張圖片？（Storage 檔案仍可能保留）")) return
+    setPending("rmAtt")
+    setError(null)
+    try {
+      const res = await fetch(
+        `/api/content/items/${encodeURIComponent(item.id)}/attachments/${encodeURIComponent(attachmentId)}`,
+        { method: "DELETE" },
+      )
+      const raw = await res.text()
+      let json = {} as { error?: string }
+      if (raw) {
+        try {
+          json = JSON.parse(raw) as { error?: string }
+        } catch {
+          setError(`移除附件失敗（${res.status}）：${raw.slice(0, 160)}`)
+          return
+        }
+      }
+      if (!res.ok) {
+        setError(json.error ?? "移除附件失敗。")
+        return
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("bdgoal:content-item-updated", { detail: { id: item.id } }),
+        )
+      }
+      await Promise.resolve(onSaved())
+      setGalleryIndex(0)
+    } catch {
+      setError("移除附件失敗，請稍後再試。")
+    } finally {
+      setPending(false)
+    }
+  }
+
   function approveDraft() {
     if (!item) return
     const next = applyStatusChangeRule("planning", plannedLocal)
@@ -158,7 +273,7 @@ export function InstagramPostDetailsPanel({
   }
 
   const busy = Boolean(pending)
-  const primaryPendingLabel =
+  const savePendingLabel =
     pending === "sync"
       ? FEEDBACK_COPY.editSyncing
       : pending === "save"
@@ -166,8 +281,9 @@ export function InstagramPostDetailsPanel({
         : false
 
   const display = item ? getInstagramDisplayStatus(item) : null
-  const img = item ? getInstagramPrimaryImageUrl(item) : null
   const persistable = item ? isInstagramPersistableItem(item) : false
+  const canDeleteManual = Boolean(item && persistable && item.source === "manual")
+  const currentAttId = galleryItems[galleryIndex]?.attachmentId
 
   return (
     <Sheet open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
@@ -201,10 +317,48 @@ export function InstagramPostDetailsPanel({
 
         {item ? (
           <div className="flex flex-1 flex-col gap-4 px-4 py-4">
-            {img ? (
-              <div className="bg-muted relative aspect-square w-full overflow-hidden rounded-lg border border-border/50">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={img} alt="" className="size-full object-cover" />
+            {galleryItems.length > 0 ? (
+              <div className="space-y-2">
+                <div className="bg-muted relative aspect-square w-full overflow-hidden rounded-lg border border-border/50">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={galleryItems[galleryIndex]?.url ?? galleryItems[0]?.url}
+                    alt=""
+                    className="size-full object-cover"
+                  />
+                </div>
+                {galleryItems.length > 1 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {galleryItems.map((g, idx) => (
+                      <button
+                        key={`${g.url}-${idx}`}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setGalleryIndex(idx)}
+                        className={cn(
+                          "ring-offset-background size-12 overflow-hidden rounded-md border-2",
+                          galleryIndex === idx ? "border-primary" : "border-transparent",
+                        )}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={g.url} alt="" className="size-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+                {currentAttId ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive border-destructive/40 w-full gap-1"
+                    disabled={busy || !persistable}
+                    onClick={() => void removeAttachment(currentAttId)}
+                  >
+                    <Trash2 className="size-3.5" aria-hidden />
+                    移除目前附件
+                  </Button>
+                ) : null}
               </div>
             ) : (
               <div className="bg-muted text-muted-foreground flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-border/60 text-xs">
@@ -213,10 +367,18 @@ export function InstagramPostDetailsPanel({
             )}
 
             <div className="space-y-1">
-              <p className="text-muted-foreground text-[11px]">Caption</p>
-              <p className="text-foreground max-h-40 overflow-y-auto text-sm leading-relaxed">
-                {item.caption?.trim() ? item.caption : "—"}
-              </p>
+              <Label htmlFor="ig-panel-caption" className="text-xs">
+                Caption
+              </Label>
+              <Textarea
+                id="ig-panel-caption"
+                value={captionDraft}
+                onChange={(e) => setCaptionDraft(e.target.value)}
+                disabled={busy || !persistable}
+                rows={5}
+                className="min-h-[100px] resize-y text-sm"
+                placeholder="編輯文案…"
+              />
             </div>
 
             <div className="grid gap-3 border-t border-border/60 pt-3">
@@ -228,7 +390,7 @@ export function InstagramPostDetailsPanel({
                   id="ig-panel-status"
                   className="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
                   value={workflow}
-                  disabled={busy}
+                  disabled={busy || !persistable}
                   onChange={(e) => {
                     const next = applyStatusChangeRule(
                       e.target.value as ContentWorkflowStatus,
@@ -246,13 +408,13 @@ export function InstagramPostDetailsPanel({
               </div>
               <div className="space-y-1">
                 <Label htmlFor="ig-panel-planned" className="text-xs">
-                  排程時間
+                  排程時間（選填；scheduled 時必填）
                 </Label>
                 <Input
                   id="ig-panel-planned"
                   type="datetime-local"
                   value={plannedLocal}
-                  disabled={busy || workflow === "published"}
+                  disabled={busy || !persistable || workflow === "published"}
                   onChange={(e) => {
                     const next = applyScheduledAtChangeRule(e.target.value, workflow)
                     setPlannedLocal(next.scheduledAt)
@@ -308,18 +470,35 @@ export function InstagramPostDetailsPanel({
             disabled={busy || !item || !persistable}
             onClick={() => void saveWith(workflow, plannedLocal)}
           >
-            <PendingButtonLabel idle="儲存變更" pending={primaryPendingLabel} />
+            <PendingButtonLabel idle="儲存變更" pending={savePendingLabel} />
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:text-destructive w-full"
-            disabled
-            title="刪除 API 尚未提供"
-          >
-            刪除（尚未開放）
-          </Button>
+          {canDeleteManual ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive w-full"
+              disabled={busy}
+              onClick={() => void deletePost()}
+            >
+              {pending === "delete" ? "刪除中…" : "刪除貼文"}
+            </Button>
+          ) : (
+            <span
+              className="inline-block w-full"
+              title="Asana 或示範資料無法由此刪除；僅手動建立的貼文可刪。"
+            >
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground w-full"
+                disabled
+              >
+                刪除貼文（僅手動建立）
+              </Button>
+            </span>
+          )}
         </SheetFooter>
       </SheetContent>
     </Sheet>

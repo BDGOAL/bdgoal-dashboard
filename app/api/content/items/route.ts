@@ -28,6 +28,7 @@ type UpdatePayload = {
   status?: "planning" | "scheduled" | "published"
   plannedPublishDate?: string | null
   localNotes?: string | null
+  caption?: string
   expectedUpdatedAt?: string
 }
 
@@ -100,6 +101,7 @@ export async function PATCH(req: Request) {
       status: body.status,
       plannedPublishDate: body.plannedPublishDate,
       localNotes: body.localNotes,
+      caption: body.caption,
       expectedUpdatedAt: body.expectedUpdatedAt,
     })
     return NextResponse.json({ ok: true, item })

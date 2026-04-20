@@ -49,6 +49,7 @@ export type UpdateStoredInput = {
   status?: DashboardStoredContentItem["status"]
   plannedPublishDate?: string | null
   localNotes?: string | null
+  caption?: string
   expectedUpdatedAt?: string
 }
 
@@ -399,6 +400,7 @@ export async function updateStoredContentItem(
           : prev.planned_publish_date,
       internal_notes:
         input.localNotes !== undefined ? input.localNotes : prev.internal_notes,
+      caption: input.caption !== undefined ? input.caption : prev.caption,
     })
     .eq("id", input.id)
     .select("*")
@@ -426,5 +428,74 @@ export async function updateStoredContentItem(
 
 export async function getDashboardContentItems(): Promise<ContentItem[]> {
   return listDashboardContentItems()
+}
+
+/**
+ * 刪除單一內容列與其附件列（不含 Storage 物件清理 — 見 API 註解）。
+ * 呼叫端須先驗證權限與 `source === "manual"`。
+ */
+export async function deleteManualContentItem(id: string): Promise<void> {
+  const supabase = await createSupabaseServerClient()
+  const { data: prev, error: prevErr } = await supabase
+    .from("content_items")
+    .select("id, source")
+    .eq("id", id)
+    .maybeSingle()
+  if (prevErr || !prev) {
+    throw new Error("找不到內容項目。")
+  }
+  if (prev.source !== "manual") {
+    throw new Error("僅能刪除手動建立的內容。")
+  }
+  const { error: attErr } = await supabase
+    .from("content_attachments")
+    .delete()
+    .eq("content_item_id", id)
+  if (attErr) {
+    throw new Error(`刪除附件失敗：${attErr.message}`)
+  }
+  const { error: delErr } = await supabase.from("content_items").delete().eq("id", id)
+  if (delErr) {
+    throw new Error(`刪除內容失敗：${delErr.message}`)
+  }
+}
+
+/**
+ * 刪除單一附件並將 `content_items.thumbnail` 重設為剩餘附件中 sort_order 最小者（無則 null）。
+ * 呼叫端須驗證權限。Storage 物件不自動刪除（TODO）。
+ */
+export async function deleteContentAttachmentForItem(
+  contentItemId: string,
+  attachmentId: string,
+): Promise<void> {
+  const supabase = await createSupabaseServerClient()
+  const { data: att, error: aErr } = await supabase
+    .from("content_attachments")
+    .select("id, content_item_id")
+    .eq("id", attachmentId)
+    .maybeSingle()
+  if (aErr || !att || att.content_item_id !== contentItemId) {
+    throw new Error("找不到附件。")
+  }
+  const { error: dErr } = await supabase.from("content_attachments").delete().eq("id", attachmentId)
+  if (dErr) {
+    throw new Error(`刪除附件失敗：${dErr.message}`)
+  }
+  const { data: remaining, error: rErr } = await supabase
+    .from("content_attachments")
+    .select("url, sort_order")
+    .eq("content_item_id", contentItemId)
+    .order("sort_order", { ascending: true })
+  if (rErr) {
+    throw new Error(`讀取剩餘附件失敗：${rErr.message}`)
+  }
+  const nextThumb = remaining?.[0]?.url ?? null
+  const { error: uErr } = await supabase
+    .from("content_items")
+    .update({ thumbnail: nextThumb })
+    .eq("id", contentItemId)
+  if (uErr) {
+    throw new Error(`更新縮圖失敗：${uErr.message}`)
+  }
 }
 

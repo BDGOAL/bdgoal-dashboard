@@ -117,7 +117,7 @@ export async function POST(req: Request, { params }: RouteParams) {
 
     const { data: item, error: itemErr } = await userSb
       .from("content_items")
-      .select("id, client_id")
+      .select("id, client_id, thumbnail")
       .eq("id", itemId)
       .maybeSingle()
 
@@ -247,7 +247,8 @@ export async function POST(req: Request, { params }: RouteParams) {
       }, "db", insErr?.message)
     }
 
-    if (sortOrder === 0) {
+    const shouldSetThumbnail = !item.thumbnail?.trim()
+    if (shouldSetThumbnail) {
       const { error: thumbErr } = await admin
         .from("content_items")
         .update({ thumbnail: publicUrl })

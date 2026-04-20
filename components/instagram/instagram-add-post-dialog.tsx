@@ -31,7 +31,7 @@ import {
   type InstagramDisplayStatus,
 } from "@/lib/instagram/instagram-display-status"
 import { isInstagramClientScope } from "@/lib/instagram/instagram-scope"
-import { uploadInstagramComposeMedia } from "@/lib/instagram/instagram-compose-upload"
+import { uploadContentItemAttachmentsSequential } from "@/lib/instagram/instagram-compose-upload"
 
 const selectClass = cn(
   "border-input bg-background dark:bg-input/30 h-9 w-full rounded-md border px-2 text-sm shadow-none outline-none",
@@ -56,6 +56,8 @@ type InstagramAddPostDialogProps = {
 }
 
 type ToastState = { message: string } | null
+
+type MediaSlot = { file: File; previewUrl: string }
 
 function displayStatusToSubmit(
   display: InstagramDisplayStatus,
@@ -131,10 +133,12 @@ export function InstagramAddPostDialog({
   const [pending, setPending] = React.useState<false | "post" | "upload" | "sync">(false)
   /** 建立成功但上傳失敗時，僅重試上傳用 */
   const [retryItemId, setRetryItemId] = React.useState<string | null>(null)
+  /** 僅重試：對應 `mediaSlots` 的索引（API 失敗時寫入；變更媒體清單時清除） */
+  const [uploadFailedIndices, setUploadFailedIndices] = React.useState<number[] | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const [toast, setToast] = React.useState<ToastState>(null)
-  const [mediaFile, setMediaFile] = React.useState<File | null>(null)
-  const [mediaPreviewUrl, setMediaPreviewUrl] = React.useState<string | null>(null)
+  const [mediaSlots, setMediaSlots] = React.useState<MediaSlot[]>([])
+  const [selectedMediaIndex, setSelectedMediaIndex] = React.useState(0)
   const [dragActive, setDragActive] = React.useState(false)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
@@ -146,9 +150,16 @@ export function InstagramAddPostDialog({
 
   React.useEffect(() => {
     return () => {
-      if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl)
+      for (const s of mediaSlots) URL.revokeObjectURL(s.previewUrl)
     }
-  }, [mediaPreviewUrl])
+  }, [mediaSlots])
+
+  React.useEffect(() => {
+    setSelectedMediaIndex((i) => {
+      if (mediaSlots.length === 0) return 0
+      return Math.min(i, mediaSlots.length - 1)
+    })
+  }, [mediaSlots.length])
 
   const reset = React.useCallback(() => {
     setSurfaceTab("post")
@@ -158,10 +169,13 @@ export function InstagramAddPostDialog({
     setScheduledLocal("")
     setError(null)
     setRetryItemId(null)
-    setMediaFile(null)
-    if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl)
-    setMediaPreviewUrl(null)
-  }, [mediaPreviewUrl])
+    setUploadFailedIndices(null)
+    setMediaSlots((prev) => {
+      for (const s of prev) URL.revokeObjectURL(s.previewUrl)
+      return []
+    })
+    setSelectedMediaIndex(0)
+  }, [])
 
   const requestClose = React.useCallback(
     (next: boolean) => {
@@ -183,22 +197,39 @@ export function InstagramAddPostDialog({
   const busy = Boolean(pending)
   const canCompose = clientScope && Boolean(clientLabelForApi)
 
-  function applyImageFile(file: File | null) {
-    if (!file || !file.type.startsWith("image/")) {
-      setError("請拖放或選擇一張圖片檔（例如 PNG、JPEG）。")
+  function appendImageFiles(source: FileList | File[] | null) {
+    if (!source || source.length === 0) return
+    const files = Array.from(source).filter((f) => f.type.startsWith("image/"))
+    if (!files.length) {
+      setError("請拖放或選擇圖片檔（image/*）。")
       return
     }
     setError(null)
-    setMediaFile(file)
-    if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl)
-    setMediaPreviewUrl(URL.createObjectURL(file))
+    setUploadFailedIndices(null)
+    setMediaSlots((prev) => {
+      const next = [...prev]
+      for (const file of files) {
+        next.push({ file, previewUrl: URL.createObjectURL(file) })
+      }
+      return next
+    })
+  }
+
+  function removeMediaAt(index: number) {
+    setUploadFailedIndices(null)
+    setMediaSlots((prev) => {
+      if (index < 0 || index >= prev.length) return prev
+      const copy = [...prev]
+      const [removed] = copy.splice(index, 1)
+      if (removed) URL.revokeObjectURL(removed.previewUrl)
+      return copy
+    })
   }
 
   function onDropMedia(e: React.DragEvent) {
     e.preventDefault()
     setDragActive(false)
-    const f = e.dataTransfer.files?.[0]
-    applyImageFile(f ?? null)
+    appendImageFiles(e.dataTransfer.files)
   }
 
   function insertCaptionSnippet(snippet: string) {
@@ -209,7 +240,7 @@ export function InstagramAddPostDialog({
     if (busy || !canCompose || !clientLabelForApi) return
 
     if (retryItemId) {
-      if (!mediaFile) {
+      if (!mediaSlots.length) {
         setError("請選擇要上傳的圖片後再試，或關閉視窗於列表中稍後補圖。")
         return
       }
@@ -217,13 +248,43 @@ export function InstagramAddPostDialog({
       setError(null)
       setToast(null)
       try {
-        const up = await uploadInstagramComposeMedia(retryItemId, mediaFile, {
-          typeLabel: mediaFile.name,
+        const files = mediaSlots.map((s) => s.file)
+        const indices =
+          uploadFailedIndices?.length && uploadFailedIndices.length < files.length
+            ? uploadFailedIndices
+            : files.map((_, i) => i)
+        const batch = await uploadContentItemAttachmentsSequential(retryItemId, files, {
+          indices,
         })
-        if (!up.ok) {
-          setError(`圖片上傳失敗：${up.error}`)
+        if (!batch.ok) {
+          if (batch.kind === "network") {
+            setUploadFailedIndices(batch.retryIndices)
+            setError(
+              `上傳中斷（${batch.succeededCount}/${indices.length} 已完成）：${batch.error}`,
+            )
+            return
+          }
+          setRetryItemId(retryItemId)
+          setUploadFailedIndices(batch.failures.map((f) => f.index))
+          const failLines = batch.failures
+            .slice(0, 4)
+            .map((f) => `「${f.fileName}」：${f.error}`)
+            .join(" ")
+          const more =
+            batch.failures.length > 4 ? ` 等共 ${batch.failures.length} 個檔案。` : ""
+          setError(
+            `部分圖片未上傳（成功 ${batch.succeededCount}，失敗 ${batch.failures.length}）：${failLines}${more}`,
+          )
+          if (batch.succeededCount > 0) {
+            try {
+              await Promise.resolve(onAdded())
+            } catch {
+              /* sync 錯誤以下方錯誤為主 */
+            }
+          }
           return
         }
+        setUploadFailedIndices(null)
         setPending("sync")
         try {
           await Promise.resolve(onAdded())
@@ -297,16 +358,29 @@ export function InstagramAddPostDialog({
         return
       }
 
-      if (mediaFile) {
+      if (mediaSlots.length > 0) {
         setPending("upload")
-        const up = await uploadInstagramComposeMedia(newId, mediaFile, {
-          typeLabel: mediaFile.name,
-        })
-        if (!up.ok) {
+        const files = mediaSlots.map((s) => s.file)
+        const batch = await uploadContentItemAttachmentsSequential(newId, files)
+        if (!batch.ok) {
           setRetryItemId(newId)
-          setError(
-            `貼文已建立，但圖片上傳失敗：${up.error}。請保留圖片後再按「儲存草稿」僅重試上傳，或關閉視窗稍後補圖。`,
-          )
+          if (batch.kind === "network") {
+            setUploadFailedIndices(batch.retryIndices)
+            setError(
+              `貼文已建立，但上傳中斷（${batch.succeededCount}/${files.length} 已完成）：${batch.error}。請再按「儲存草稿」僅重試未完成檔案。`,
+            )
+          } else {
+            setUploadFailedIndices(batch.failures.map((f) => f.index))
+            const failLines = batch.failures
+              .slice(0, 3)
+              .map((f) => `「${f.fileName}」：${f.error}`)
+              .join(" ")
+            const more =
+              batch.failures.length > 3 ? ` 等共 ${batch.failures.length} 個檔案。` : ""
+            setError(
+              `貼文已建立；圖片部分失敗（成功 ${batch.succeededCount}，失敗 ${batch.failures.length}）：${failLines}${more} 可保留圖片後再按「儲存草稿」重試失敗項目。`,
+            )
+          }
           setPending("sync")
           try {
             await Promise.resolve(onAdded())
@@ -319,6 +393,7 @@ export function InstagramAddPostDialog({
           }
           return
         }
+        setUploadFailedIndices(null)
       }
 
       setPending("sync")
@@ -436,30 +511,78 @@ export function InstagramAddPostDialog({
                   ref={fileInputRef}
                   type="file"
                   accept="image/*"
+                  multiple
                   className="sr-only"
                   disabled={busy}
-                  onChange={(e) => applyImageFile(e.target.files?.[0] ?? null)}
+                  onChange={(e) => {
+                    appendImageFiles(e.target.files)
+                    e.target.value = ""
+                  }}
                 />
-                {mediaPreviewUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={mediaPreviewUrl}
-                    alt=""
-                    className="max-h-[min(50vh,360px)] w-full rounded-lg object-contain"
-                  />
+                {mediaSlots.length > 0 ? (
+                  <div className="flex w-full flex-col gap-2">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={mediaSlots[selectedMediaIndex]?.previewUrl ?? ""}
+                      alt=""
+                      className="max-h-[min(50vh,360px)] w-full rounded-lg object-contain"
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {mediaSlots.map((slot, idx) => (
+                        <div key={`${slot.previewUrl}-${idx}`} className="relative">
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedMediaIndex(idx)
+                            }}
+                            className={cn(
+                              "ring-offset-background size-14 overflow-hidden rounded-md border-2 bg-black/20",
+                              selectedMediaIndex === idx
+                                ? "border-primary"
+                                : "border-transparent",
+                            )}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={slot.previewUrl}
+                              alt=""
+                              className="size-full object-cover"
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              removeMediaAt(idx)
+                            }}
+                            className="bg-background/90 text-destructive absolute -right-1 -top-1 flex size-5 items-center justify-center rounded-full border text-[10px] shadow"
+                            aria-label="移除此圖"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-muted-foreground text-center text-[11px]">
+                      可繼續點擊或拖放加入更多圖片（依序上傳）。
+                    </p>
+                  </div>
                 ) : (
                   <>
                     <Upload className="text-muted-foreground size-10" aria-hidden />
                     <p className="text-muted-foreground text-center text-sm">
-                      拖放圖片至此，或點擊上傳
+                      拖放一張或多張圖片，或點擊上傳
                     </p>
                     <p className="text-muted-foreground text-center text-[11px]">
-                      儲存後會上傳至 Supabase Storage 並建立附件紀錄。
+                      儲存後會依序上傳至 Supabase Storage 並建立附件紀錄。
                     </p>
                   </>
                 )}
               </div>
-              {mediaPreviewUrl ? (
+              {mediaSlots.length > 0 ? (
                 <Button
                   type="button"
                   variant="outline"
@@ -468,13 +591,15 @@ export function InstagramAddPostDialog({
                   disabled={busy}
                   onClick={(e) => {
                     e.stopPropagation()
-                    setMediaFile(null)
-                    if (mediaPreviewUrl) URL.revokeObjectURL(mediaPreviewUrl)
-                    setMediaPreviewUrl(null)
+                    setUploadFailedIndices(null)
+                    setMediaSlots((prev) => {
+                      for (const s of prev) URL.revokeObjectURL(s.previewUrl)
+                      return []
+                    })
                   }}
                 >
                   <Trash2 className="size-3.5" aria-hidden />
-                  移除圖片
+                  移除全部圖片
                 </Button>
               ) : null}
             </div>
@@ -607,7 +732,7 @@ export function InstagramAddPostDialog({
 
               {error ? <p className="text-destructive text-xs">{error}</p> : null}
               <p className="text-muted-foreground text-[11px] leading-relaxed">
-                流程：先建立內容項目，再上傳圖片。若上傳失敗，貼文仍會保留，可再按「儲存草稿」僅重試上傳。
+                流程：先建立內容項目，再依序上傳多張圖片。若部分失敗，貼文仍會保留，可再按「儲存草稿」僅重試失敗的檔案。
                 「儲存草稿」／待審核可不填日期；有填則一併儲存為預計時間。「排程」按鈕須有時間；「發佈」為 published。
               </p>
             </div>
