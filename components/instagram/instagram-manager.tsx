@@ -75,6 +75,7 @@ function applyInstagramOrderLocally(rows: ContentItem[], orderedIds: string[]): 
   const ordered = reorderRowsByIds(rows, orderedIds)
   return ordered.map((row, index) => ({
     ...row,
+    // 可見位置（row-major）直接映射到持久欄位：左上 = 0，往右遞增，換行後續增。
     instagramOrder: index,
   }))
 }

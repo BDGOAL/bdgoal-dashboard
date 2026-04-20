@@ -124,33 +124,6 @@ function isLikelyMissingInstagramOrderColumn(
   )
 }
 
-/** 同一客戶底下所有 Instagram／ig 列之最大 `instagram_order` + 1（無則 0） */
-async function nextInstagramWallOrder(
-  supabase: SupabaseClient,
-  clientId: string,
-): Promise<number> {
-  const { data, error } = await supabase
-    .from("content_items")
-    .select("instagram_order, platform")
-    .eq("client_id", clientId)
-  if (error) {
-    if (isLikelyMissingInstagramOrderColumn(error)) {
-      console.warn(
-        "[content/store] instagram_order 欄位可能尚未 migration，略過讀取排序：",
-        error.message,
-      )
-      return 0
-    }
-    throw new Error(`讀取排序失敗：${error.message}`)
-  }
-  const nums = (data ?? [])
-    .filter((r) => isInstagramPlatformDb(r.platform))
-    .map((r) => r.instagram_order)
-    .filter((n): n is number => typeof n === "number" && Number.isFinite(n))
-  if (!nums.length) return 0
-  return Math.max(...nums) + 1
-}
-
 async function insertNewClientByName(
   supabase: SupabaseClient,
   trimmed: string,
@@ -431,13 +404,7 @@ export async function createManualContentItem(
   const now = new Date().toISOString()
   const ctx = await getPermissionContext()
   if (!ctx) throw new Error("未登入，無法新增內容。")
-  const supabase = await createSupabaseServerClient()
-  const clientId = await deriveClientId(input.client.trim())
-  const plat = input.platform.trim().toLowerCase()
-  let igOrder: number | undefined
-  if (plat === "instagram" || plat === "ig") {
-    igOrder = await nextInstagramWallOrder(supabase, clientId)
-  }
+  await deriveClientId(input.client.trim())
   const item: DashboardStoredContentItem = {
     id: crypto.randomUUID(),
     source: "manual",
@@ -454,7 +421,11 @@ export async function createManualContentItem(
     status: input.status,
     attachments: [],
     localNotes: input.localNotes ?? null,
-    instagramOrder: igOrder,
+    /**
+     * 新建貼文預設不寫 `instagram_order`：牆面以 fallback（`updatedAt` 新者在前）顯示，
+     * 使最新貼文出現在左上。使用者首次拖曳排序後，才由 reorder API 寫入 0..n-1 的顯式順序。
+     */
+    instagramOrder: undefined,
     createdAt: now,
     updatedAt: now,
   }
