@@ -28,6 +28,7 @@ type UpdatePayload = {
   status?: "planning" | "scheduled" | "published"
   plannedPublishDate?: string | null
   localNotes?: string | null
+  title?: string
   caption?: string
   expectedUpdatedAt?: string
 }
@@ -101,6 +102,7 @@ export async function PATCH(req: Request) {
       status: body.status,
       plannedPublishDate: body.plannedPublishDate,
       localNotes: body.localNotes,
+      title: body.title?.trim() ?? undefined,
       caption: body.caption,
       expectedUpdatedAt: body.expectedUpdatedAt,
     })

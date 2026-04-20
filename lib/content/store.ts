@@ -53,6 +53,7 @@ export type UpdateStoredInput = {
   status?: DashboardStoredContentItem["status"]
   plannedPublishDate?: string | null
   localNotes?: string | null
+  title?: string
   caption?: string
   expectedUpdatedAt?: string
 }
@@ -516,6 +517,7 @@ export async function updateStoredContentItem(
           : prev.planned_publish_date,
       internal_notes:
         input.localNotes !== undefined ? input.localNotes : prev.internal_notes,
+      title: input.title !== undefined ? input.title : prev.title,
       caption: input.caption !== undefined ? input.caption : prev.caption,
     })
     .eq("id", input.id)

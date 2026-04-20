@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Trash2 } from "lucide-react"
+import { Trash2, Upload } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,6 +19,12 @@ import type { ContentItem } from "@/lib/types/dashboard"
 import { toPlannedPublishDateIso } from "@/components/instagram/status-schedule-rules"
 import { contentItemPlannedInputValue } from "@/lib/instagram/datetime-local"
 import { isInstagramPersistableItem } from "@/lib/instagram/instagram-ui-persistence"
+import {
+  PLANNER_UPLOAD_MAX_FILES,
+  compressFilesForPlannerUpload,
+  validatePlannerImageFileForQueue,
+} from "@/lib/instagram/instagram-image-upload-client"
+import { uploadContentItemAttachmentsSequential } from "@/lib/instagram/instagram-compose-upload"
 import {
   DialogInlineToast,
   FEEDBACK_COPY,
@@ -52,12 +58,16 @@ export function InstagramPostDetailsPanel({
   onOpenChange,
   onSaved,
 }: Props) {
+  const [titleDraft, setTitleDraft] = React.useState("")
   const [plannedLocal, setPlannedLocal] = React.useState("")
   const [captionDraft, setCaptionDraft] = React.useState("")
   const [galleryIndex, setGalleryIndex] = React.useState(0)
-  const [pending, setPending] = React.useState<false | "save" | "sync" | "delete" | "rmAtt">(false)
+  const [pending, setPending] = React.useState<
+    false | "save" | "sync" | "delete" | "rmAtt" | "upload"
+  >(false)
   const [error, setError] = React.useState<string | null>(null)
   const [toast, setToast] = React.useState<ToastState>(null)
+  const uploadInputRef = React.useRef<HTMLInputElement>(null)
 
   React.useEffect(() => {
     if (!toast) return
@@ -67,6 +77,7 @@ export function InstagramPostDetailsPanel({
 
   React.useEffect(() => {
     if (!item) return
+    setTitleDraft(item.title ?? "")
     setPlannedLocal(contentItemPlannedInputValue(item))
     setCaptionDraft(item.caption ?? "")
     setGalleryIndex(0)
@@ -89,6 +100,11 @@ export function InstagramPostDetailsPanel({
     setError(null)
     setToast(null)
     try {
+      const trimmedTitle = titleDraft.trim()
+      if (!trimmedTitle) {
+        setError("請填寫標題。")
+        return
+      }
       let plannedIso: string | null = null
       if (plannedLocal.trim() !== "") {
         plannedIso = toPlannedPublishDateIso(plannedLocal)
@@ -103,6 +119,7 @@ export function InstagramPostDetailsPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: item.id,
+          title: trimmedTitle,
           caption: captionDraft,
           plannedPublishDate: plannedIso,
           expectedUpdatedAt: item.updatedAt,
@@ -225,6 +242,64 @@ export function InstagramPostDetailsPanel({
     }
   }
 
+  async function addImages(filesLike: FileList | File[] | null) {
+    if (pending || !item || !isInstagramPersistableItem(item) || readOnlyImported) return
+    const files = Array.from(filesLike ?? []).filter((f) => f.type.startsWith("image/"))
+    if (!files.length) {
+      setError("目前僅支援圖片上傳。")
+      return
+    }
+    const existing = (item.attachments ?? []).filter((a) => a.url?.trim()).length
+    const room = Math.max(0, PLANNER_UPLOAD_MAX_FILES - existing)
+    if (files.length > room) {
+      setError(
+        room <= 0
+          ? `此貼文最多 ${PLANNER_UPLOAD_MAX_FILES} 張，請先移除部分圖片。`
+          : `此貼文最多 ${PLANNER_UPLOAD_MAX_FILES} 張，尚可再加入 ${room} 張。`,
+      )
+      return
+    }
+    for (const file of files) {
+      const v = validatePlannerImageFileForQueue(file)
+      if (v) {
+        setError(v)
+        return
+      }
+    }
+    setPending("upload")
+    setError(null)
+    try {
+      const compressed = await compressFilesForPlannerUpload(files)
+      const result = await uploadContentItemAttachmentsSequential(item.id, compressed)
+      if (!result.ok) {
+        if (result.kind === "network") {
+          setError(
+            `上傳中斷（成功 ${result.succeededCount}/${compressed.length}）：${result.error}`,
+          )
+        } else {
+          setError(
+            `部分圖片上傳失敗（成功 ${result.succeededCount}，失敗 ${result.failures.length}）。`,
+          )
+        }
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("bdgoal:content-item-updated", { detail: { id: item.id } }),
+        )
+      }
+      setPending("sync")
+      await Promise.resolve(onSaved())
+      setToast({
+        message: result.ok ? "已新增圖片" : "圖片已部分新增，請檢查結果",
+      })
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "上傳失敗，請稍後再試。")
+    } finally {
+      setPending(false)
+      if (uploadInputRef.current) uploadInputRef.current.value = ""
+    }
+  }
+
   const busy = Boolean(pending)
   const savePendingLabel =
     pending === "sync"
@@ -270,6 +345,19 @@ export function InstagramPostDetailsPanel({
                 示範資料無法寫入伺服器。
               </p>
             ) : null}
+            <div className="space-y-1">
+              <Label htmlFor="ig-panel-title" className="text-xs">
+                標題
+              </Label>
+              <Input
+                id="ig-panel-title"
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                disabled={fieldLocked}
+                className="h-9"
+                placeholder="貼文標題"
+              />
+            </div>
             {galleryItems.length > 0 ? (
               <div className="space-y-2">
                 <div className="bg-muted relative aspect-square w-full overflow-hidden rounded-lg border border-border/50">
@@ -312,10 +400,56 @@ export function InstagramPostDetailsPanel({
                     移除目前圖片
                   </Button>
                 ) : null}
+                <div>
+                  <input
+                    ref={uploadInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/svg+xml"
+                    multiple
+                    className="sr-only"
+                    disabled={fieldLocked}
+                    onChange={(e) => void addImages(e.target.files)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-1 w-full gap-1"
+                    disabled={fieldLocked}
+                    onClick={() => uploadInputRef.current?.click()}
+                  >
+                    <Upload className="size-3.5" aria-hidden />
+                    新增圖片
+                  </Button>
+                </div>
               </div>
             ) : (
-              <div className="bg-muted text-muted-foreground flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-border/60 text-xs">
-                無圖片
+              <div className="space-y-2">
+                <div className="bg-muted text-muted-foreground flex aspect-square w-full items-center justify-center rounded-lg border border-dashed border-border/60 text-xs">
+                  無圖片
+                </div>
+                <div>
+                  <input
+                    ref={uploadInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif,image/bmp,image/svg+xml"
+                    multiple
+                    className="sr-only"
+                    disabled={fieldLocked}
+                    onChange={(e) => void addImages(e.target.files)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full gap-1"
+                    disabled={fieldLocked}
+                    onClick={() => uploadInputRef.current?.click()}
+                  >
+                    <Upload className="size-3.5" aria-hidden />
+                    新增圖片
+                  </Button>
+                </div>
               </div>
             )}
 
