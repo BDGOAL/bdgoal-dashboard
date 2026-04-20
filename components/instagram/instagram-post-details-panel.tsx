@@ -272,6 +272,9 @@ export function InstagramPostDetailsPanel({
 
   const display = item ? getInstagramDisplayStatus(item) : null
   const persistable = item ? isInstagramPersistableItem(item) : false
+  /** Asana 匯入：可開啟詳情預覽，欄位唯讀（與 Calendar 一致由同一 Sheet 呈現） */
+  const readOnlyImported = Boolean(item?.source === "asana")
+  const fieldLocked = Boolean(busy || !persistable || readOnlyImported)
   const canDeleteManual = Boolean(item && persistable && item.source === "manual")
   const currentAttId = galleryItems[galleryIndex]?.attachmentId
 
@@ -307,6 +310,17 @@ export function InstagramPostDetailsPanel({
 
         {item ? (
           <div className="flex flex-1 flex-col gap-4 px-4 py-4">
+            {readOnlyImported ? (
+              <p className="bg-muted/50 text-muted-foreground rounded-md border border-border/50 px-3 py-2 text-[11px] leading-relaxed">
+                此貼文來自 <span className="text-foreground font-medium">Asana</span>{" "}
+                匯入，僅供在此檢視與對齊牆面／月曆；編輯內容請回到 Asana 來源任務。
+              </p>
+            ) : null}
+            {!persistable && !readOnlyImported ? (
+              <p className="bg-muted/50 text-muted-foreground rounded-md border border-border/50 px-3 py-2 text-[11px] leading-relaxed">
+                示範資料無法寫入伺服器；請使用「完整編輯」僅檢視欄位說明。
+              </p>
+            ) : null}
             {galleryItems.length > 0 ? (
               <div className="space-y-2">
                 <div className="bg-muted relative aspect-square w-full overflow-hidden rounded-lg border border-border/50">
@@ -342,7 +356,7 @@ export function InstagramPostDetailsPanel({
                     variant="outline"
                     size="sm"
                     className="text-destructive border-destructive/40 w-full gap-1"
-                    disabled={busy || !persistable}
+                    disabled={fieldLocked}
                     onClick={() => void removeAttachment(currentAttId)}
                   >
                     <Trash2 className="size-3.5" aria-hidden />
@@ -364,7 +378,7 @@ export function InstagramPostDetailsPanel({
                 id="ig-panel-caption"
                 value={captionDraft}
                 onChange={(e) => setCaptionDraft(e.target.value)}
-                disabled={busy || !persistable}
+                disabled={fieldLocked}
                 rows={5}
                 className="min-h-[100px] resize-y text-sm"
                 placeholder="編輯文案…"
@@ -380,7 +394,7 @@ export function InstagramPostDetailsPanel({
                   id="ig-panel-status"
                   className="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
                   value={workflow}
-                  disabled={busy || !persistable}
+                  disabled={fieldLocked}
                   onChange={(e) => {
                     const next = applyStatusChangeRule(
                       e.target.value as ContentWorkflowStatus,
@@ -404,7 +418,7 @@ export function InstagramPostDetailsPanel({
                   id="ig-panel-planned"
                   type="datetime-local"
                   value={plannedLocal}
-                  disabled={busy || !persistable || workflow === "published"}
+                  disabled={fieldLocked || workflow === "published"}
                   onChange={(e) => {
                     const next = applyScheduledAtChangeRule(e.target.value, workflow)
                     setPlannedLocal(next.scheduledAt)
@@ -431,7 +445,7 @@ export function InstagramPostDetailsPanel({
               variant="secondary"
               size="sm"
               className="w-full"
-              disabled={busy || !persistable}
+              disabled={fieldLocked}
               onClick={() => void approveDraft()}
             >
               核准（轉為草稿／規劃）
@@ -442,7 +456,10 @@ export function InstagramPostDetailsPanel({
             variant="outline"
             size="sm"
             className="w-full gap-1.5"
-            disabled={busy || !item}
+            disabled={busy || !item || readOnlyImported}
+            title={
+              readOnlyImported ? "Asana 項目請於來源編輯" : undefined
+            }
             onClick={() => {
               if (item) {
                 onOpenChange(false)
@@ -457,7 +474,7 @@ export function InstagramPostDetailsPanel({
             type="button"
             size="sm"
             className="w-full"
-            disabled={busy || !item || !persistable}
+            disabled={busy || !item || !persistable || readOnlyImported}
             onClick={() => void saveWith(workflow, plannedLocal)}
           >
             <PendingButtonLabel idle="儲存變更" pending={savePendingLabel} />
