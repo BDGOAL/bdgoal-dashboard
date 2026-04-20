@@ -122,7 +122,7 @@ export function InstagramGridView({
         icon={ImageIcon}
         title={`為「${clientDisplayName}」建立第一則 Instagram 貼文`}
         reason="此客戶目前沒有任何 Instagram 內容。"
-        suggestion="點「新增貼文」撰寫內容，或從 Asana Ready Queue 匯入。"
+        suggestion="點「新增貼文」加入內容。"
       />
     )
   }
@@ -150,15 +150,7 @@ export function InstagramGridView({
   }
 
   return (
-    <div className="flex min-w-0 max-w-full flex-col gap-3" onDragEnd={clearDragState}>
-      <p className="text-muted-foreground text-[11px] leading-relaxed">
-        <span className="text-foreground font-medium">{clientDisplayName}</span>
-        <span className="text-muted-foreground">
-          {" "}
-          · 單一動態牆（4:5，對應 1080×1350）· 點圖開詳情 · 非已發佈項目可拖曳排序
-        </span>
-      </p>
-
+    <div className="flex min-w-0 max-w-full flex-col gap-2" onDragEnd={clearDragState}>
       <div className={wallGridClass}>{displayItems.map((item) => renderCard(item))}</div>
     </div>
   )

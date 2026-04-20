@@ -276,7 +276,7 @@ export function InstagramCalendarView({
         icon={CalendarDays}
         title={`為「${clientDisplayName}」建立第一則 Instagram 貼文`}
         reason="此客戶目前沒有任何可顯示在行事曆上的內容。"
-        suggestion="新增貼文並設定排程，或從 Asana 匯入。"
+        suggestion="點「新增貼文」並設定日期。"
       />
     )
   }
@@ -284,12 +284,10 @@ export function InstagramCalendarView({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-muted-foreground text-xs">
-          顯示範圍：
-          <span className="text-foreground font-medium">{clientDisplayName}</span>
-          <span className="text-muted-foreground"> · Instagram</span>
-        </p>
-        <div className="flex flex-wrap items-center gap-1">
+        <h2 className="text-foreground font-heading min-w-0 text-base font-semibold">
+          {monthLabel}
+        </h2>
+        <div className="flex shrink-0 flex-wrap items-center gap-1">
           <Button
             type="button"
             variant="outline"
@@ -320,11 +318,6 @@ export function InstagramCalendarView({
             <ChevronRight className="size-4" />
           </Button>
         </div>
-      </div>
-
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-foreground font-heading text-base font-semibold">{monthLabel}</h2>
-        <span className="text-muted-foreground text-[11px]">拖曳貼文至其他日期以調整排程</span>
       </div>
 
       {unscheduled.length > 0 ? (

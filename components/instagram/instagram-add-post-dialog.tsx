@@ -273,7 +273,7 @@ export function InstagramAddPostDialog({
           <DialogHeader className="border-border/50 space-y-1 border-b px-4 py-3 text-left">
             <DialogTitle className="text-base">撰寫貼文</DialogTitle>
             <DialogDescription className="text-xs">
-              由此建立的項目預設為已發佈（published），不強制排程日期；圖片可於送出後在背景上傳。
+              新增至預覽牆；圖片於送出後在背景上傳。
             </DialogDescription>
           </DialogHeader>
 

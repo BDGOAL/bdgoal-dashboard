@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ExternalLink, Trash2 } from "lucide-react"
+import { Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,17 +16,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import type { ContentItem } from "@/lib/types/dashboard"
-import {
-  applyScheduledAtChangeRule,
-  applyStatusChangeRule,
-  toPlannedPublishDateIso,
-  validateStatusAndScheduledAt,
-  type ContentWorkflowStatus,
-} from "@/components/instagram/status-schedule-rules"
-import {
-  getInstagramDisplayStatus,
-  instagramDisplayStatusLabel,
-} from "@/lib/instagram/instagram-display-status"
+import { toPlannedPublishDateIso } from "@/components/instagram/status-schedule-rules"
 import { contentItemPlannedInputValue } from "@/lib/instagram/datetime-local"
 import { isInstagramPersistableItem } from "@/lib/instagram/instagram-ui-persistence"
 import {
@@ -36,13 +26,6 @@ import {
 } from "@/components/dashboard/async-feedback"
 import { cn } from "@/lib/utils"
 
-function contentItemToWorkflow(item: ContentItem): ContentWorkflowStatus {
-  if (item.status === "published") return "published"
-  if (item.status === "scheduled") return "scheduled"
-  return "planning"
-}
-
-/** 圖庫順序與 `content_attachments.sort_order` 一致；無附件列時僅顯示 thumbnail（不可單張刪除）。 */
 function galleryItemsForItem(item: ContentItem): Array<{ url: string; attachmentId?: string }> {
   const atts = item.attachments ?? []
   const withUrl = atts.filter((a) => a.url?.trim())
@@ -59,7 +42,6 @@ type Props = {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSaved: () => void | Promise<void>
-  onRequestFullEdit: (item: ContentItem) => void
 }
 
 type ToastState = { message: string } | null
@@ -69,9 +51,7 @@ export function InstagramPostDetailsPanel({
   open,
   onOpenChange,
   onSaved,
-  onRequestFullEdit,
 }: Props) {
-  const [workflow, setWorkflow] = React.useState<ContentWorkflowStatus>("planning")
   const [plannedLocal, setPlannedLocal] = React.useState("")
   const [captionDraft, setCaptionDraft] = React.useState("")
   const [galleryIndex, setGalleryIndex] = React.useState(0)
@@ -87,7 +67,6 @@ export function InstagramPostDetailsPanel({
 
   React.useEffect(() => {
     if (!item) return
-    setWorkflow(contentItemToWorkflow(item))
     setPlannedLocal(contentItemPlannedInputValue(item))
     setCaptionDraft(item.caption ?? "")
     setGalleryIndex(0)
@@ -100,39 +79,32 @@ export function InstagramPostDetailsPanel({
     setGalleryIndex((i) => Math.min(i, Math.max(0, galleryItems.length - 1)))
   }, [galleryItems.length, item?.id])
 
-  async function saveWith(wf: ContentWorkflowStatus, planned: string) {
+  async function saveChanges() {
     if (pending || !item) return
     if (!isInstagramPersistableItem(item)) {
-      setError("此為示範資料，請使用「完整編輯」查看欄位（無法寫入伺服器）。")
+      setError("此為示範資料，無法寫入伺服器。")
       return
     }
     setPending("save")
     setError(null)
     setToast(null)
     try {
-      const ruleError = validateStatusAndScheduledAt(wf, planned)
-      if (ruleError) {
-        setError(ruleError)
-        return
+      let plannedIso: string | null = null
+      if (plannedLocal.trim() !== "") {
+        plannedIso = toPlannedPublishDateIso(plannedLocal)
+        if (!plannedIso) {
+          setError("日期與時間格式無效，請修正或留空。")
+          return
+        }
       }
-      const iso =
-        wf === "published"
-          ? null
-          : planned.trim() === ""
-            ? null
-            : toPlannedPublishDateIso(planned)
-      if (wf !== "published" && planned.trim() !== "" && iso === null) {
-        setError("日期與時間格式無效，請修正或留空。")
-        return
-      }
+
       const res = await fetch("/api/content/items", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           id: item.id,
-          status: wf,
-          plannedPublishDate: iso,
           caption: captionDraft,
+          plannedPublishDate: plannedIso,
           expectedUpdatedAt: item.updatedAt,
         }),
       })
@@ -253,15 +225,6 @@ export function InstagramPostDetailsPanel({
     }
   }
 
-  function approveDraft() {
-    if (!item) return
-    const next = applyStatusChangeRule("planning", plannedLocal)
-    setWorkflow(next.status)
-    setPlannedLocal(next.scheduledAt)
-    setError(null)
-    void saveWith(next.status, next.scheduledAt)
-  }
-
   const busy = Boolean(pending)
   const savePendingLabel =
     pending === "sync"
@@ -270,9 +233,7 @@ export function InstagramPostDetailsPanel({
         ? FEEDBACK_COPY.editSaving
         : false
 
-  const display = item ? getInstagramDisplayStatus(item) : null
   const persistable = item ? isInstagramPersistableItem(item) : false
-  /** Asana 匯入：可開啟詳情預覽，欄位唯讀（與 Calendar 一致由同一 Sheet 呈現） */
   const readOnlyImported = Boolean(item?.source === "asana")
   const fieldLocked = Boolean(busy || !persistable || readOnlyImported)
   const canDeleteManual = Boolean(item && persistable && item.source === "manual")
@@ -292,33 +253,21 @@ export function InstagramPostDetailsPanel({
         ) : null}
         <SheetHeader className="border-border/60 border-b px-4 pb-3">
           <SheetTitle className="pr-8 text-left leading-snug">
-            {item?.title ?? "貼文詳情"}
+            {item?.title ?? "貼文"}
           </SheetTitle>
-          <SheetDescription className="text-left text-xs">
-            {display ? (
-              <span>
-                狀態標籤：
-                <span className="text-foreground font-medium">
-                  {instagramDisplayStatusLabel[display]}
-                </span>
-              </span>
-            ) : (
-              "檢視圖片、文案與排程。"
-            )}
-          </SheetDescription>
+          <SheetDescription className="text-left text-xs">編輯文案與行事曆日期。</SheetDescription>
         </SheetHeader>
 
         {item ? (
           <div className="flex flex-1 flex-col gap-4 px-4 py-4">
             {readOnlyImported ? (
-              <p className="bg-muted/50 text-muted-foreground rounded-md border border-border/50 px-3 py-2 text-[11px] leading-relaxed">
-                此貼文來自 <span className="text-foreground font-medium">Asana</span>{" "}
-                匯入，僅供在此檢視與對齊牆面／月曆；編輯內容請回到 Asana 來源任務。
+              <p className="bg-muted/40 text-muted-foreground rounded-md border border-border/50 px-3 py-2 text-[11px] leading-relaxed">
+                此內容僅供預覽，無法在此編輯。
               </p>
             ) : null}
             {!persistable && !readOnlyImported ? (
-              <p className="bg-muted/50 text-muted-foreground rounded-md border border-border/50 px-3 py-2 text-[11px] leading-relaxed">
-                示範資料無法寫入伺服器；請使用「完整編輯」僅檢視欄位說明。
+              <p className="bg-muted/40 text-muted-foreground rounded-md border border-border/50 px-3 py-2 text-[11px] leading-relaxed">
+                示範資料無法寫入伺服器。
               </p>
             ) : null}
             {galleryItems.length > 0 ? (
@@ -360,7 +309,7 @@ export function InstagramPostDetailsPanel({
                     onClick={() => void removeAttachment(currentAttId)}
                   >
                     <Trash2 className="size-3.5" aria-hidden />
-                    移除目前附件
+                    移除目前圖片
                   </Button>
                 ) : null}
               </div>
@@ -372,7 +321,7 @@ export function InstagramPostDetailsPanel({
 
             <div className="space-y-1">
               <Label htmlFor="ig-panel-caption" className="text-xs">
-                Caption
+                文案
               </Label>
               <Textarea
                 id="ig-panel-caption"
@@ -385,99 +334,38 @@ export function InstagramPostDetailsPanel({
               />
             </div>
 
-            <div className="grid gap-3 border-t border-border/60 pt-3">
-              <div className="space-y-1">
-                <Label htmlFor="ig-panel-status" className="text-xs">
-                  工作流程狀態
-                </Label>
-                <select
-                  id="ig-panel-status"
-                  className="border-input bg-background h-9 w-full rounded-md border px-2 text-sm"
-                  value={workflow}
-                  disabled={fieldLocked}
-                  onChange={(e) => {
-                    const next = applyStatusChangeRule(
-                      e.target.value as ContentWorkflowStatus,
-                      plannedLocal,
-                    )
-                    setWorkflow(next.status)
-                    setPlannedLocal(next.scheduledAt)
-                    setError(null)
-                  }}
-                >
-                  <option value="planning">planning（草稿／規劃）</option>
-                  <option value="scheduled">scheduled（已排程）</option>
-                  <option value="published">published（已發佈）</option>
-                </select>
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor="ig-panel-planned" className="text-xs">
-                  排程時間（選填；scheduled 時必填）
-                </Label>
-                <Input
-                  id="ig-panel-planned"
-                  type="datetime-local"
-                  value={plannedLocal}
-                  disabled={fieldLocked || workflow === "published"}
-                  onChange={(e) => {
-                    const next = applyScheduledAtChangeRule(e.target.value, workflow)
-                    setPlannedLocal(next.scheduledAt)
-                    setWorkflow(next.status)
-                    setError(null)
-                  }}
-                  className="h-9"
-                />
-                {workflow === "published" ? (
-                  <p className="text-muted-foreground text-[11px]">
-                    已發佈項目不需設定排程時間。
-                  </p>
-                ) : null}
-              </div>
+            <div className="space-y-1 border-t border-border/60 pt-3">
+              <Label htmlFor="ig-panel-planned" className="text-xs">
+                行事曆日期（選填）
+              </Label>
+              <Input
+                id="ig-panel-planned"
+                type="datetime-local"
+                value={plannedLocal}
+                disabled={fieldLocked}
+                onChange={(e) => {
+                  setPlannedLocal(e.target.value)
+                  setError(null)
+                }}
+                className="h-9"
+              />
+              <p className="text-muted-foreground text-[11px] leading-relaxed">
+                留空則不顯示在月曆格線日期上（仍可能出現在未設定日期區）。
+              </p>
               {error ? <p className="text-destructive text-xs">{error}</p> : null}
             </div>
           </div>
         ) : null}
 
-        <SheetFooter className="border-border/60 gap-2 border-t">
-          {item && display === "needsApproval" ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              className="w-full"
-              disabled={fieldLocked}
-              onClick={() => void approveDraft()}
-            >
-              核准（轉為草稿／規劃）
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="w-full gap-1.5"
-            disabled={busy || !item || readOnlyImported}
-            title={
-              readOnlyImported ? "Asana 項目請於來源編輯" : undefined
-            }
-            onClick={() => {
-              if (item) {
-                onOpenChange(false)
-                onRequestFullEdit(item)
-              }
-            }}
-          >
-            <ExternalLink className="size-3.5" aria-hidden />
-            完整編輯
-          </Button>
+        <SheetFooter className="border-border/60 flex-col gap-2 border-t">
           <Button
             type="button"
             size="sm"
             className="w-full"
             disabled={busy || !item || !persistable || readOnlyImported}
-            onClick={() => void saveWith(workflow, plannedLocal)}
+            onClick={() => void saveChanges()}
           >
-            <PendingButtonLabel idle="儲存變更" pending={savePendingLabel} />
+            <PendingButtonLabel idle="儲存" pending={savePendingLabel} />
           </Button>
           {canDeleteManual ? (
             <Button
@@ -490,22 +378,7 @@ export function InstagramPostDetailsPanel({
             >
               {pending === "delete" ? "刪除中…" : "刪除貼文"}
             </Button>
-          ) : (
-            <span
-              className="inline-block w-full"
-              title="Asana 或示範資料無法由此刪除；僅手動建立的貼文可刪。"
-            >
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground w-full"
-                disabled
-              >
-                刪除貼文（僅手動建立）
-              </Button>
-            </span>
-          )}
+          ) : null}
         </SheetFooter>
       </SheetContent>
     </Sheet>

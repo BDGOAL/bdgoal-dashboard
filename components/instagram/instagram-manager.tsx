@@ -5,7 +5,6 @@ import * as React from "react"
 import { ListSyncStatus } from "@/components/dashboard/async-feedback"
 import { InstagramAddPostDialog } from "@/components/instagram/instagram-add-post-dialog"
 import { InstagramClientBar } from "@/components/instagram/instagram-client-bar"
-import { ContentItemEditDialog } from "@/components/instagram/content-item-edit-dialog"
 import { InstagramCalendarView } from "@/components/instagram/instagram-calendar-view"
 import { InstagramGridView } from "@/components/instagram/instagram-grid-view"
 import { InstagramPostDetailsPanel } from "@/components/instagram/instagram-post-details-panel"
@@ -134,8 +133,6 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
 
   const [mainView, setMainView] = React.useState<InstagramMainView>("grid")
   const [loading, setLoading] = React.useState(false)
-  const [editItem, setEditItem] = React.useState<ContentItem | null>(null)
-  const [editOpen, setEditOpen] = React.useState(false)
   const [detailsItem, setDetailsItem] = React.useState<ContentItem | null>(null)
   const [detailsOpen, setDetailsOpen] = React.useState(false)
 
@@ -363,9 +360,9 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
       {!clientOk ? (
         <EmptyState
           icon={ImageIcon}
-          title="請選擇單一客戶"
-          reason="Instagram Grid 與 Calendar 只顯示一個客戶的貼文，避免混版。"
-          suggestion="請在上方「範圍」或此處選擇器指定客戶；「全部客戶」無法在此頁規劃版面。"
+          title="請選擇客戶"
+          reason="預覽牆與月曆僅顯示單一客戶。"
+          suggestion="請在右上角選擇客戶。"
         />
       ) : (
         <>
@@ -416,17 +413,6 @@ export function InstagramManager({ items }: { items: ContentItem[] }) {
         item={detailsItem}
         open={detailsOpen}
         onOpenChange={setDetailsOpen}
-        onSaved={() => refreshRows()}
-        onRequestFullEdit={(item) => {
-          setEditItem(item)
-          setEditOpen(true)
-        }}
-      />
-
-      <ContentItemEditDialog
-        item={editItem}
-        open={editOpen}
-        onOpenChange={setEditOpen}
         onSaved={() => refreshRows()}
       />
     </div>
