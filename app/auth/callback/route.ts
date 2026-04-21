@@ -43,37 +43,44 @@ export async function GET(req: Request) {
   try {
     const supabase = await createSupabaseServerClient()
 
-    if (type === "recovery" && tokenHash) {
-      console.info("[auth/callback] branch=recovery_token_hash")
-      const { error: verifyError } = await supabase.auth.verifyOtp({
-        token_hash: tokenHash,
-        type: "recovery",
-      })
-      if (verifyError) {
+    if (type === "recovery") {
+      console.info("[auth/callback] branch=recovery")
+      if (tokenHash) {
+        const { error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: tokenHash,
+          type: "recovery",
+        })
+        if (verifyError) {
+          return new NextResponse(
+            toErrorHtml(
+              "重設連結失效",
+              `無法驗證重設密碼連結：${verifyError.message}`,
+            ),
+            {
+              status: 400,
+              headers: { "content-type": "text/html; charset=utf-8" },
+            },
+          )
+        }
+      } else if (code) {
+        const { error: exchangeRecoveryError } = await supabase.auth.exchangeCodeForSession(code)
+        if (exchangeRecoveryError) {
+          return new NextResponse(
+            toErrorHtml(
+              "重設連結失效",
+              `無法完成重設密碼驗證：${exchangeRecoveryError.message}`,
+            ),
+            {
+              status: 400,
+              headers: { "content-type": "text/html; charset=utf-8" },
+            },
+          )
+        }
+      } else {
         return new NextResponse(
           toErrorHtml(
-            "重設連結失效",
-            `無法驗證重設密碼連結：${verifyError.message}`,
-          ),
-          {
-            status: 400,
-            headers: { "content-type": "text/html; charset=utf-8" },
-          },
-        )
-      }
-
-      console.info("[auth/callback] redirect => /auth/reset-password")
-      return NextResponse.redirect(new URL("/auth/reset-password", reqUrl.origin))
-    }
-
-    if (type === "recovery" && code) {
-      console.info("[auth/callback] branch=recovery_code")
-      const { error: exchangeRecoveryError } = await supabase.auth.exchangeCodeForSession(code)
-      if (exchangeRecoveryError) {
-        return new NextResponse(
-          toErrorHtml(
-            "重設連結失效",
-            `無法完成重設密碼驗證：${exchangeRecoveryError.message}`,
+            "重設連結無效",
+            "缺少 recovery token。請重新從登入頁寄送重設密碼連結。",
           ),
           {
             status: 400,
