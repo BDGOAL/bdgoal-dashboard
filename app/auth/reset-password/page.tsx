@@ -15,6 +15,10 @@ export default function ResetPasswordPage() {
   const [error, setError] = React.useState<string | null>(null)
   const [message, setMessage] = React.useState<string | null>(null)
 
+  React.useEffect(() => {
+    console.info("[auth/reset-password] page rendered")
+  }, [])
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (pending) return
@@ -41,9 +45,11 @@ export default function ResetPasswordPage() {
         password,
       })
       if (updateError) {
+        console.error("[auth/reset-password] updateUser failed", updateError.message)
         setError(`更新密碼失敗：${updateError.message}`)
         return
       }
+      console.info("[auth/reset-password] password updated, redirect => /")
       setMessage("密碼已更新，正在返回 Dashboard...")
       router.replace("/")
     } catch (e) {
