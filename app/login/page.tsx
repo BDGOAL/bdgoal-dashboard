@@ -32,10 +32,38 @@ async function signInWithPassword(formData: FormData) {
   }
 }
 
+async function sendRecoveryEmail(formData: FormData) {
+  "use server"
+  const email = String(formData.get("email") ?? "").trim()
+  if (!email) {
+    redirect(`/login?error=${encodeURIComponent("請先輸入 Email，再寄送重設連結。")}`)
+  }
+  try {
+    const supabase = await createSupabaseServerClient()
+    const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
+    const redirectTo = `${origin}/auth/callback`
+    console.info("[login/sendRecoveryEmail] sending recovery email", {
+      email,
+      redirectTo,
+    })
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    })
+    if (error) {
+      console.error("[login/sendRecoveryEmail] resetPasswordForEmail failed:", error.message)
+      redirect(`/login?error=${encodeURIComponent(`寄送重設信失敗：${error.message}`)}`)
+    }
+    redirect(`/login?message=${encodeURIComponent("重設密碼信已寄出，請檢查信箱。")}`)
+  } catch (error) {
+    console.error("[login/sendRecoveryEmail] fatal:", error)
+    throw error
+  }
+}
+
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string }>
+  searchParams: Promise<{ next?: string; error?: string; message?: string }>
 }) {
   let user: { id: string } | null = null
   let configError: string | null = null
@@ -68,7 +96,7 @@ export default async function LoginPage({
     })
     configError = msg
   }
-  const { next, error } = await searchParams
+  const { next, error, message } = await searchParams
   if (user) {
     redirect(next || "/")
   }
@@ -99,12 +127,23 @@ export default async function LoginPage({
             {error}
           </p>
         ) : null}
+        {message ? (
+          <p className="mt-2 text-xs text-emerald-500" role="status">
+            {message}
+          </p>
+        ) : null}
         <form action={signInWithPassword} className="mt-4 space-y-3">
           <Input name="email" type="email" placeholder="name@bdgoal.com" required />
           <Input name="password" type="password" placeholder="Password" required />
           <input type="hidden" name="next" value={next ?? ""} />
           <Button type="submit" className="w-full">
             登入
+          </Button>
+        </form>
+        <form action={sendRecoveryEmail} className="mt-2 space-y-2">
+          <Input name="email" type="email" placeholder="忘記密碼請輸入 Email" required />
+          <Button type="submit" variant="ghost" className="w-full">
+            寄送重設密碼連結
           </Button>
         </form>
       </div>

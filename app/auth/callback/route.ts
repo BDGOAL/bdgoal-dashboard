@@ -31,11 +31,20 @@ export async function GET(req: Request) {
   const tokenHash = reqUrl.searchParams.get("token_hash")
   const type = reqUrl.searchParams.get("type")
   const redirectPath = resolveRedirectPath(reqUrl)
+  console.info("[auth/callback] incoming", {
+    pathname: reqUrl.pathname,
+    type,
+    hasCode: Boolean(code),
+    hasTokenHash: Boolean(tokenHash),
+    redirectTo: reqUrl.searchParams.get("redirect_to"),
+    next: reqUrl.searchParams.get("next"),
+  })
 
   try {
     const supabase = await createSupabaseServerClient()
 
     if (type === "recovery" && tokenHash) {
+      console.info("[auth/callback] branch=recovery_token_hash")
       const { error: verifyError } = await supabase.auth.verifyOtp({
         token_hash: tokenHash,
         type: "recovery",
@@ -53,10 +62,12 @@ export async function GET(req: Request) {
         )
       }
 
+      console.info("[auth/callback] redirect => /auth/reset-password")
       return NextResponse.redirect(new URL("/auth/reset-password", reqUrl.origin))
     }
 
     if (type === "recovery" && code) {
+      console.info("[auth/callback] branch=recovery_code")
       const { error: exchangeRecoveryError } = await supabase.auth.exchangeCodeForSession(code)
       if (exchangeRecoveryError) {
         return new NextResponse(
@@ -71,6 +82,7 @@ export async function GET(req: Request) {
         )
       }
 
+      console.info("[auth/callback] redirect => /auth/reset-password")
       return NextResponse.redirect(new URL("/auth/reset-password", reqUrl.origin))
     }
 
@@ -144,6 +156,7 @@ export async function GET(req: Request) {
     )
   }
 
+  console.info("[auth/callback] branch=normal_signin redirect", { redirectPath })
   return NextResponse.redirect(new URL(redirectPath, reqUrl.origin))
 }
 

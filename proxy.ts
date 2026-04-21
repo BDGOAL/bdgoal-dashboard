@@ -46,6 +46,13 @@ export async function proxy(req: NextRequest) {
   } = await supabase.auth.getUser()
 
   const pathname = req.nextUrl.pathname
+  if (pathname.startsWith("/auth/")) {
+    console.info("[proxy] auth-path", {
+      pathname,
+      hasUser: Boolean(user),
+      isInternalPath: isInternalPath(pathname),
+    })
+  }
   if (!user && isInternalPath(pathname)) {
     const redirectUrl = req.nextUrl.clone()
     redirectUrl.pathname = "/login"
