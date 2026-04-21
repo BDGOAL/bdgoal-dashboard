@@ -28,23 +28,47 @@ function resolveRedirectPath(reqUrl: URL): string {
 export async function GET(req: Request) {
   const reqUrl = new URL(req.url)
   const code = reqUrl.searchParams.get("code")
+  const tokenHash = reqUrl.searchParams.get("token_hash")
+  const type = reqUrl.searchParams.get("type")
   const redirectPath = resolveRedirectPath(reqUrl)
-
-  if (!code) {
-    return new NextResponse(
-      toErrorHtml(
-        "登入連結無效",
-        "缺少授權 code。請重新從登入頁寄送 magic link。",
-      ),
-      {
-        status: 400,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      },
-    )
-  }
 
   try {
     const supabase = await createSupabaseServerClient()
+
+    if (type === "recovery" && tokenHash) {
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        token_hash: tokenHash,
+        type: "recovery",
+      })
+      if (verifyError) {
+        return new NextResponse(
+          toErrorHtml(
+            "重設連結失效",
+            `無法驗證重設密碼連結：${verifyError.message}`,
+          ),
+          {
+            status: 400,
+            headers: { "content-type": "text/html; charset=utf-8" },
+          },
+        )
+      }
+
+      return NextResponse.redirect(new URL("/auth/reset-password", reqUrl.origin))
+    }
+
+    if (!code) {
+      return new NextResponse(
+        toErrorHtml(
+          "登入連結無效",
+          "缺少授權 code。請重新從登入頁登入。",
+        ),
+        {
+          status: 400,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        },
+      )
+    }
+
     const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code)
     if (exchangeError) {
       return new NextResponse(
