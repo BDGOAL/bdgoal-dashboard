@@ -40,8 +40,9 @@ async function sendRecoveryEmail(formData: FormData) {
   }
   try {
     const supabase = await createSupabaseServerClient()
-    const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
-    const redirectTo = `${origin}/auth/callback`
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL
+    if (!appUrl) throw new Error("NEXT_PUBLIC_APP_URL is not set")
+    const redirectTo = `${appUrl}/auth/callback`
     console.info("[login/sendRecoveryEmail] sending recovery email", {
       email,
       redirectTo,
