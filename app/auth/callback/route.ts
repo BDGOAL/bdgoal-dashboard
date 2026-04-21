@@ -51,6 +51,11 @@ export async function GET(req: Request) {
           type: "recovery",
         })
         if (verifyError) {
+          console.error("[auth/callback] recovery verifyOtp failed", {
+            message: verifyError.message,
+            code: (verifyError as { code?: string }).code,
+            status: (verifyError as { status?: number }).status,
+          })
           return new NextResponse(
             toErrorHtml(
               "重設連結失效",
@@ -65,6 +70,11 @@ export async function GET(req: Request) {
       } else if (code) {
         const { error: exchangeRecoveryError } = await supabase.auth.exchangeCodeForSession(code)
         if (exchangeRecoveryError) {
+          console.error("[auth/callback] recovery exchangeCodeForSession failed", {
+            message: exchangeRecoveryError.message,
+            code: (exchangeRecoveryError as { code?: string }).code,
+            status: (exchangeRecoveryError as { status?: number }).status,
+          })
           return new NextResponse(
             toErrorHtml(
               "重設連結失效",

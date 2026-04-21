@@ -14,9 +14,59 @@ export default function ResetPasswordPage() {
   const [pending, setPending] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [message, setMessage] = React.useState<string | null>(null)
+  const [sessionChecked, setSessionChecked] = React.useState(false)
+
+  function formatSupabaseError(
+    prefix: string,
+    err: { message: string; code?: string; status?: number },
+  ) {
+    const details = [err.code ? `code=${err.code}` : null, err.status ? `status=${err.status}` : null]
+      .filter(Boolean)
+      .join(", ")
+    return details ? `${prefix}：${err.message}（${details}）` : `${prefix}：${err.message}`
+  }
 
   React.useEffect(() => {
     console.info("[auth/reset-password] page rendered")
+    let cancelled = false
+    void (async () => {
+      try {
+        const supabase = createSupabaseBrowserClient()
+        const [{ data: sessionData, error: sessionError }, { data: userData, error: userError }] =
+          await Promise.all([supabase.auth.getSession(), supabase.auth.getUser()])
+
+        if (sessionError || userError) {
+          const err = sessionError ?? userError
+          console.error("[auth/reset-password] session check failed", {
+            message: err?.message,
+            code: (err as { code?: string } | null)?.code,
+            status: (err as { status?: number } | null)?.status,
+          })
+        }
+
+        const hasSession = Boolean(sessionData.session)
+        const hasUser = Boolean(userData.user)
+        console.info("[auth/reset-password] session check", { hasSession, hasUser })
+
+        if (!cancelled && (!hasSession || !hasUser)) {
+          setError("Your reset session is missing or expired. Please request a new password reset link.")
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(
+            e instanceof Error
+              ? `無法驗證重設密碼會話：${e.message}`
+              : "無法驗證重設密碼會話，請重新寄送重設連結。",
+          )
+        }
+      } finally {
+        if (!cancelled) setSessionChecked(true)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -41,12 +91,27 @@ export default function ResetPasswordPage() {
     setMessage(null)
     try {
       const supabase = createSupabaseBrowserClient()
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser()
+      if (userError) {
+        const userErr = userError as { message: string; code?: string; status?: number }
+        console.error("[auth/reset-password] getUser before update failed", userErr)
+        setError(formatSupabaseError("無法確認重設會話", userErr))
+        return
+      }
+      if (!user) {
+        setError("Your reset session is missing or expired. Please request a new password reset link.")
+        return
+      }
       const { error: updateError } = await supabase.auth.updateUser({
         password,
       })
       if (updateError) {
-        console.error("[auth/reset-password] updateUser failed", updateError.message)
-        setError(`更新密碼失敗：${updateError.message}`)
+        const updateErr = updateError as { message: string; code?: string; status?: number }
+        console.error("[auth/reset-password] updateUser failed", updateErr)
+        setError(formatSupabaseError("更新密碼失敗", updateErr))
         return
       }
       console.info("[auth/reset-password] password updated, redirect => /")
@@ -89,8 +154,8 @@ export default function ResetPasswordPage() {
             onChange={(event) => setConfirmPassword(event.target.value)}
             required
           />
-          <Button type="submit" className="w-full" disabled={pending}>
-            {pending ? "更新中..." : "更新密碼"}
+          <Button type="submit" className="w-full" disabled={pending || !sessionChecked}>
+            {pending ? "更新中..." : !sessionChecked ? "檢查重設會話中..." : "更新密碼"}
           </Button>
         </form>
       </div>
