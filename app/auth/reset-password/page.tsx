@@ -1,11 +1,11 @@
 "use client"
 
 import * as React from "react"
+import { createBrowserClient } from "@supabase/ssr"
 import { useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { createSupabaseBrowserClient } from "@/lib/supabase/client"
 
 export default function ResetPasswordPage() {
   const router = useRouter()
@@ -15,6 +15,16 @@ export default function ResetPasswordPage() {
   const [error, setError] = React.useState<string | null>(null)
   const [message, setMessage] = React.useState<string | null>(null)
   const [sessionChecked, setSessionChecked] = React.useState(false)
+  const [configError, setConfigError] = React.useState<string | null>(null)
+
+  const supabase = React.useMemo(() => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    if (!url || !anon) {
+      return null
+    }
+    return createBrowserClient(url, anon)
+  }, [])
 
   function formatSupabaseError(
     prefix: string,
@@ -31,7 +41,13 @@ export default function ResetPasswordPage() {
     let cancelled = false
     void (async () => {
       try {
-        const supabase = createSupabaseBrowserClient()
+        if (!supabase) {
+          if (!cancelled) {
+            setConfigError("登入設定缺失，請聯絡管理員或稍後再試。")
+            setError("Your reset session is missing or expired. Please request a new password reset link.")
+          }
+          return
+        }
         const [{ data: sessionData, error: sessionError }, { data: userData, error: userError }] =
           await Promise.all([supabase.auth.getSession(), supabase.auth.getUser()])
 
@@ -67,7 +83,7 @@ export default function ResetPasswordPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [supabase])
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -90,7 +106,10 @@ export default function ResetPasswordPage() {
     setError(null)
     setMessage(null)
     try {
-      const supabase = createSupabaseBrowserClient()
+      if (!supabase) {
+        setError("登入設定缺失，請聯絡管理員或稍後再試。")
+        return
+      }
       const {
         data: { user },
         error: userError,
@@ -139,6 +158,11 @@ export default function ResetPasswordPage() {
             {message}
           </p>
         ) : null}
+        {configError ? (
+          <p className="text-destructive mt-2 text-xs" role="alert">
+            {configError}
+          </p>
+        ) : null}
         <form className="mt-4 space-y-3" onSubmit={onSubmit}>
           <Input
             type="password"
@@ -154,7 +178,7 @@ export default function ResetPasswordPage() {
             onChange={(event) => setConfirmPassword(event.target.value)}
             required
           />
-          <Button type="submit" className="w-full" disabled={pending || !sessionChecked}>
+          <Button type="submit" className="w-full" disabled={pending || !sessionChecked || !supabase}>
             {pending ? "更新中..." : !sessionChecked ? "檢查重設會話中..." : "更新密碼"}
           </Button>
         </form>
