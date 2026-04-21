@@ -8,9 +8,11 @@ const INTERNAL_API_PREFIXES = [
   "/api/asana/ready-queue",
   "/api/preview-links",
 ]
+const PUBLIC_PATHS = ["/login", "/auth/callback", "/auth/reset-password", "/auth/logout"]
 
 function isInternalPath(pathname: string) {
-  if (pathname === "/login" || pathname.startsWith("/auth/")) return false
+  if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return false
+  if (pathname.startsWith("/auth/")) return false
   if (pathname.startsWith("/client-preview/")) return false
   if (pathname.startsWith("/_next") || pathname === "/favicon.ico") return false
   return INTERNAL_PREFIXES.some((p) => (p === "/" ? pathname === "/" : pathname.startsWith(p)))

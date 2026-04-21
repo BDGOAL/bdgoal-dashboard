@@ -56,6 +56,24 @@ export async function GET(req: Request) {
       return NextResponse.redirect(new URL("/auth/reset-password", reqUrl.origin))
     }
 
+    if (type === "recovery" && code) {
+      const { error: exchangeRecoveryError } = await supabase.auth.exchangeCodeForSession(code)
+      if (exchangeRecoveryError) {
+        return new NextResponse(
+          toErrorHtml(
+            "重設連結失效",
+            `無法完成重設密碼驗證：${exchangeRecoveryError.message}`,
+          ),
+          {
+            status: 400,
+            headers: { "content-type": "text/html; charset=utf-8" },
+          },
+        )
+      }
+
+      return NextResponse.redirect(new URL("/auth/reset-password", reqUrl.origin))
+    }
+
     if (!code) {
       return new NextResponse(
         toErrorHtml(
