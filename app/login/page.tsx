@@ -7,25 +7,27 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
-async function sendMagicLink(formData: FormData) {
+async function signInWithPassword(formData: FormData) {
   "use server"
   const email = String(formData.get("email") ?? "").trim()
-  if (!email) return
+  const password = String(formData.get("password") ?? "")
+  const next = String(formData.get("next") ?? "").trim()
+  if (!email || !password) {
+    redirect(`/login?error=${encodeURIComponent("請輸入 Email 與密碼")}`)
+  }
   try {
     const supabase = await createSupabaseServerClient()
-    const origin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
-    const { error } = await supabase.auth.signInWithOtp({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
-      options: {
-        emailRedirectTo: `${origin}/auth/callback`,
-      },
+      password,
     })
     if (error) {
-      console.error("[login/sendMagicLink] signInWithOtp failed:", error.message)
-      throw new Error(`寄送登入連結失敗：${error.message}`)
+      console.error("[login/signInWithPassword] signInWithPassword failed:", error.message)
+      redirect(`/login?error=${encodeURIComponent(`登入失敗：${error.message}`)}`)
     }
+    redirect(next || "/")
   } catch (error) {
-    console.error("[login/sendMagicLink] fatal:", error)
+    console.error("[login/signInWithPassword] fatal:", error)
     throw error
   }
 }
@@ -33,7 +35,7 @@ async function sendMagicLink(formData: FormData) {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>
+  searchParams: Promise<{ next?: string; error?: string }>
 }) {
   let user: { id: string } | null = null
   let configError: string | null = null
@@ -66,7 +68,7 @@ export default async function LoginPage({
     })
     configError = msg
   }
-  const next = (await searchParams).next
+  const { next, error } = await searchParams
   if (user) {
     redirect(next || "/")
   }
@@ -91,13 +93,18 @@ export default async function LoginPage({
     <main className="bg-background text-foreground flex min-h-screen items-center justify-center p-6">
       <div className="w-full max-w-sm rounded-lg border p-5">
         <h1 className="text-lg font-semibold">BDGoal Dashboard 登入</h1>
-        <p className="text-muted-foreground mt-1 text-sm">
-          使用公司信箱接收 magic link。
-        </p>
-        <form action={sendMagicLink} className="mt-4 space-y-3">
+        <p className="text-muted-foreground mt-1 text-sm">請使用公司帳號密碼登入。</p>
+        {error ? (
+          <p className="text-destructive mt-2 text-xs" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <form action={signInWithPassword} className="mt-4 space-y-3">
           <Input name="email" type="email" placeholder="name@bdgoal.com" required />
+          <Input name="password" type="password" placeholder="Password" required />
+          <input type="hidden" name="next" value={next ?? ""} />
           <Button type="submit" className="w-full">
-            寄送登入連結
+            登入
           </Button>
         </form>
       </div>
