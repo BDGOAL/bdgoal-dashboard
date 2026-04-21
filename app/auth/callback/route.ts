@@ -56,15 +56,11 @@ export async function GET(req: Request) {
             code: (verifyError as { code?: string }).code,
             status: (verifyError as { status?: number }).status,
           })
-          return new NextResponse(
-            toErrorHtml(
-              "重設連結失效",
-              `無法驗證重設密碼連結：${verifyError.message}`,
+          return NextResponse.redirect(
+            new URL(
+              `/login?error=${encodeURIComponent("重設連結已失效，請重新寄送重設密碼連結。")}`,
+              reqUrl.origin,
             ),
-            {
-              status: 400,
-              headers: { "content-type": "text/html; charset=utf-8" },
-            },
           )
         }
       } else if (code) {
@@ -75,27 +71,19 @@ export async function GET(req: Request) {
             code: (exchangeRecoveryError as { code?: string }).code,
             status: (exchangeRecoveryError as { status?: number }).status,
           })
-          return new NextResponse(
-            toErrorHtml(
-              "重設連結失效",
-              `無法完成重設密碼驗證：${exchangeRecoveryError.message}`,
+          return NextResponse.redirect(
+            new URL(
+              `/login?error=${encodeURIComponent("重設連結已失效，請重新寄送重設密碼連結。")}`,
+              reqUrl.origin,
             ),
-            {
-              status: 400,
-              headers: { "content-type": "text/html; charset=utf-8" },
-            },
           )
         }
       } else {
-        return new NextResponse(
-          toErrorHtml(
-            "重設連結無效",
-            "缺少 recovery token。請重新從登入頁寄送重設密碼連結。",
+        return NextResponse.redirect(
+          new URL(
+            `/login?error=${encodeURIComponent("重設連結無效，請重新寄送重設密碼連結。")}`,
+            reqUrl.origin,
           ),
-          {
-            status: 400,
-            headers: { "content-type": "text/html; charset=utf-8" },
-          },
         )
       }
 
