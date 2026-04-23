@@ -4,6 +4,7 @@ import type { ContentItem } from "@/lib/types/dashboard"
 import { createSupabaseServerClient } from "@/lib/supabase/server"
 import { listDashboardContentItems } from "@/lib/repositories/content-repository"
 import { getPermissionContext } from "@/lib/auth/roles"
+import { stripImageDeliveryParams } from "@/lib/storage/strip-image-delivery-params"
 
 export type DashboardStoredContentItem = {
   id: string
@@ -248,7 +249,7 @@ export function mapAsanaReadyToStoredContentItem(
     attachments: item.attachments
       .map((a) => ({
         name: a.name,
-        url: a.viewUrl ?? a.downloadUrl ?? "",
+        url: stripImageDeliveryParams(a.viewUrl ?? a.downloadUrl ?? ""),
       }))
       .filter((a) => a.url),
     localNotes: null,

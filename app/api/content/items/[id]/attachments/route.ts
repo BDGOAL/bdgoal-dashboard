@@ -7,6 +7,7 @@ import {
   CONTENT_MEDIA_BUCKET,
   CONTENT_MEDIA_ITEMS_PREFIX,
 } from "@/lib/storage/content-media-bucket"
+import { stripImageDeliveryParams } from "@/lib/storage/strip-image-delivery-params"
 
 export const dynamic = "force-dynamic"
 
@@ -230,7 +231,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     const { data: pub } = admin.storage
       .from(CONTENT_MEDIA_BUCKET)
       .getPublicUrl(objectPath)
-    const publicUrl = pub.publicUrl
+    const publicUrl = stripImageDeliveryParams(pub.publicUrl)
 
     const { data: lastRow } = await admin
       .from("content_attachments")
