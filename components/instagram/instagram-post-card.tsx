@@ -13,7 +13,7 @@ import { getInstagramPrimaryImageUrl } from "@/lib/instagram/instagram-media"
 import { cn } from "@/lib/utils"
 
 /** 規劃牆使用較緊湊 5:6 預覽；實際 IG 發佈仍以 4:5（1080×1350）為基準。 */
-const WALL_ASPECT = "aspect-[5/6]"
+const WALL_ASPECT = "aspect-[3/4]"
 
 function formatScheduleCorner(value: string | null | undefined): string {
   if (!value) return ""
