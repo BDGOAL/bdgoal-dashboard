@@ -1,9 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { Trash2, Upload } from "lucide-react"
+import { Download, Trash2, Upload } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -313,6 +313,7 @@ export function InstagramPostDetailsPanel({
   const fieldLocked = Boolean(busy || !persistable || readOnlyImported)
   const canDeleteManual = Boolean(item && persistable && item.source === "manual")
   const currentAttId = galleryItems[galleryIndex]?.attachmentId
+  const downloadableAttachments = (item?.attachments ?? []).filter((a) => a.url?.trim())
 
   return (
     <Sheet open={open} onOpenChange={(v) => !busy && onOpenChange(v)}>
@@ -384,6 +385,28 @@ export function InstagramPostDetailsPanel({
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={g.url} alt="" className="size-full object-cover" />
                       </button>
+                    ))}
+                  </div>
+                ) : null}
+                {downloadableAttachments.length > 0 ? (
+                  <div className="flex flex-col gap-1.5">
+                    {downloadableAttachments.map((attachment, idx) => (
+                      <a
+                        key={attachment.id ?? `${attachment.url}-${idx}`}
+                        href={attachment.url!}
+                        download
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className={buttonVariants({
+                          variant: "outline",
+                          size: "sm",
+                          className: "w-full",
+                        })}
+                      >
+                        <Download className="size-3.5" aria-hidden />
+                        下載原圖
+                      </a>
                     ))}
                   </div>
                 ) : null}
