@@ -47,11 +47,17 @@ function attachmentsFromNestedRow(
   if (!raw?.length) return []
   return [...raw]
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-    .map((a) => ({
-      id: a.id,
-      name: a.type ?? "asset",
-      url: stripImageDeliveryParams(a.url),
-    }))
+    .map((a) => {
+      const rawUrl = a.url
+      console.log("[attachment url before strip]", rawUrl)
+      const strippedUrl = stripImageDeliveryParams(rawUrl)
+      console.log("[attachment url after strip]", strippedUrl)
+      return {
+        id: a.id,
+        name: a.type ?? "asset",
+        url: strippedUrl,
+      }
+    })
 }
 
 function normalizePlatform(input: string): ContentPlatform | null {
