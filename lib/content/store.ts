@@ -526,28 +526,12 @@ export async function getDashboardContentItems(): Promise<ContentItem[]> {
  */
 export async function deleteManualContentItem(id: string): Promise<void> {
   const supabase = await createSupabaseServerClient()
-  const { data: prev, error: prevErr } = await supabase
+  const { error } = await supabase
     .from("content_items")
-    .select("id, source")
-    .eq("id", id)
-    .maybeSingle()
-  if (prevErr || !prev) {
-    throw new Error("找不到內容項目。")
-  }
-  if (prev.source !== "manual") {
-    throw new Error("僅能刪除手動建立的內容。")
-  }
-  const { error: attErr } = await supabase
-    .from("content_attachments")
     .delete()
-    .eq("content_item_id", id)
-  if (attErr) {
-    throw new Error(`刪除附件失敗：${attErr.message}`)
-  }
-  const { error: delErr } = await supabase.from("content_items").delete().eq("id", id)
-  if (delErr) {
-    throw new Error(`刪除內容失敗：${delErr.message}`)
-  }
+    .eq("id", id)
+    .eq("source", "manual")
+  if (error) throw error
 }
 
 /**
